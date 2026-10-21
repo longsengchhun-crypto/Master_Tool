@@ -19,6 +19,11 @@ allow = [
 ]
 confidence-threshold = 0.9
 
+# Our own crates are proprietary and never published to crates.io.
+[licenses.private]
+ignore = true
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+allow-wildcard-paths = true

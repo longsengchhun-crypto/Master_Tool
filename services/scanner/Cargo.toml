@@ -1,4 +1,5 @@
-﻿[package]
+[package]
+publish = false
 name = "sentrix-core"
 version = "0.1.0"
 edition = "2021"
