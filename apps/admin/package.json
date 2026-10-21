@@ -1,0 +1,36 @@
+{
+    "name":  "@sentrix/admin",
+    "version":  "0.1.0",
+    "private":  true,
+    "scripts":  {
+                    "dev":  "next dev -p 3100",
+                    "build":  "next build",
+                    "start":  "next start -p 3100",
+                    "migrate":  "node scripts/migrate.mjs",
+                    "test":  "vitest run",
+                    "typecheck":  "tsc --noEmit"
+                },
+    "dependencies":  {
+                         "@sentrix/contracts":  "*",
+                         "@node-rs/argon2":  "^2.0.2",
+                         "jose":  "^6.2.13",
+                         "next":  "^16.4.2",
+                         "otplib":  "^13.5.0",
+                         "pg":  "^8.23.1",
+                         "react":  "^19.3.1",
+                         "react-dom":  "^19.3.1",
+                         "zod":  "^4.6.7",
+                         "lucide-react":  "^1.60.0",
+                         "@fontsource-variable/inter":  "^5.3.0"
+                     },
+    "devDependencies":  {
+                            "@types/node":  "^24.0.0",
+                            "@types/pg":  "^8.15.0",
+                            "@types/react":  "^19.0.0",
+                            "@types/react-dom":  "^19.0.0",
+                            "typescript":  "~5.9.0",
+                            "vitest":  "^5.0.5",
+                            "tailwindcss":  "^4.3.3",
+                            "@tailwindcss/postcss":  "^4.3.3"
+                        }
+}

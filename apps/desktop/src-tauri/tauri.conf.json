@@ -1,0 +1,63 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SENTRIX",
+  "version": "0.1.0",
+  "identifier": "app.sentrix.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "SENTRIX",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 980,
+        "minHeight": 660,
+        "center": true,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA1QzQzNDIyMjhBMjhGNzcKUldSM2o2SW9JalRFQlpzNWZ6RFFqcDR4NXF1UFFKVlYxeWo1WCtEdk9pa2VlbC9HZEVFbFowTkEK"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": ["nsis"],
+    "publisher": "SENTRIX",
+    "copyright": "Copyright (c) SENTRIX",
+    "category": "Utility",
+    "resources": {
+      "engine-staging/clamav/": "engine/clamav/"
+    },
+    "shortDescription": "SENTRIX - Intelligent File Security",
+    "longDescription": "SENTRIX inspects files with a layered detection engine, explains the results in plain language, and keeps suspicious files in a protected quarantine.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "installer/hooks.nsh"
+      }
+    }
+  }
+}

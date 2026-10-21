@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = ["services/scanner", "apps/desktop/src-tauri"]
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+# panic stays "unwind": analyzers are wrapped in catch_unwind so a parser crash degrades to UNABLE_TO_VERIFY.

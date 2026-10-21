@@ -1,0 +1,26 @@
+# Local DEVELOPMENT stack only (throwaway credentials). Not executed in the authoring environment.
+#   docker compose -f infrastructure/docker-compose.yml up --build
+# Then, once:  docker compose exec console npm run migrate -w @sentrix/admin
+#              docker compose exec -e SENTRIX_ADMIN_EMAIL=you@example.com console node apps/admin/scripts/bootstrap-admin.mjs
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: dev-only-password
+      POSTGRES_DB: sentrix
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sentrix"]
+      interval: 5s
+      retries: 10
+  console:
+    build: { context: .., dockerfile: infrastructure/Dockerfile }
+    depends_on: { db: { condition: service_healthy } }
+    environment:
+      DATABASE_URL: postgresql://postgres:dev-only-password@db:5432/sentrix
+      SESSION_SECRET: dev-only-session-secret-change-me-0123456789abcdef
+      DEVICE_TOKEN_PEPPER: dev-only-device-pepper-change-me-0123456789
+    ports: ["127.0.0.1:3100:3100"]
+volumes:
+  pgdata: {}

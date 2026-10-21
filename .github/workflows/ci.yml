@@ -1,0 +1,78 @@
+# CI. Written but not executed in the authoring environment: expect to fix small things on the first run.
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+permissions: { contents: read }
+
+jobs:
+  rust:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build front-end (Tauri needs ../dist)
+        run: |
+          npm ci
+          npm run build -w @sentrix/desktop
+      - run: cargo test --workspace --locked
+      # Real-ClamAV engine tests need the ClamAV runtime + signature DB; run them in the release pipeline, not here.
+
+  console:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-retries 10
+    env:
+      # Local Postgres without TLS; the test harness pins a throwaway schema per run.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      SESSION_SECRET: ci-only-session-secret-0123456789abcdef0123456789abcdef
+      DEVICE_TOKEN_PEPPER: ci-only-device-pepper-0123456789abcdef0123456789
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck -w @sentrix/admin
+      - run: npm run build -w @sentrix/admin
+      - run: npx vitest run
+        working-directory: apps/admin
+
+  desktop-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm run build -w @sentrix/desktop
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-audit cargo-deny --locked
+      - run: cargo audit
+      - run: cargo deny check licenses bans advisories
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions: { security-events: write, contents: read }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with: { languages: javascript-typescript }
+      - uses: github/codeql-action/analyze@v3
