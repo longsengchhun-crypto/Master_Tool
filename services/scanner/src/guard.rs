@@ -47,7 +47,7 @@ fn check_target(path: &Path) -> Result<(), GuardError> {
 
 #[cfg(windows)]
 fn run(args: &[&std::ffi::OsStr]) -> Result<String, GuardError> {
-    let out = Command::new(icacls()).args(args).output().map_err(|e| GuardError::Failed(e.to_string()))?;
+    let out = crate::proc::no_window(Command::new(icacls()).args(args)).output().map_err(|e| GuardError::Failed(e.to_string()))?;
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     if out.status.success() {
         Ok(text)

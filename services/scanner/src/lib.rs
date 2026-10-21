@@ -11,6 +11,7 @@ pub mod identify;
 pub mod monitor;
 pub mod notify;
 pub mod quarantine;
+pub mod proc;
 pub mod queue;
 pub mod report;
 pub mod scanner;

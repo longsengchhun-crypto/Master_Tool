@@ -122,12 +122,7 @@ impl ClamEngine {
                 conf_path(&self.db_dir())
             ),
         )?;
-        let out = Command::new(self.exe("freshclam"))
-            .arg(format!("--config-file={}", conf.display()))
-            .arg("--stdout")
-            .arg("--no-warnings")
-            .stdin(Stdio::null())
-            .output()?;
+        let out = crate::proc::no_window(Command::new(self.exe("freshclam")).arg(format!("--config-file={}", conf.display())).arg("--stdout").arg("--no-warnings").stdin(Stdio::null())).output()?;
         let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         if !out.status.success() {
             return Err(ClamError::StartFailed(format!("freshclam exited with {}: {}", out.status, text.lines().last().unwrap_or(""))));
@@ -156,11 +151,7 @@ impl ClamEngine {
                 conf_path(&self.db_dir())
             ),
         )?;
-        let child = Command::new(self.exe("clamd"))
-            .arg(format!("--config-file={}", conf.display()))
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+        let child = crate::proc::no_window(Command::new(self.exe("clamd")).arg(format!("--config-file={}", conf.display())).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()))
             .spawn()
             .map_err(|e| ClamError::StartFailed(e.to_string()))?;
         job::kill_with_parent(&child);
