@@ -169,8 +169,11 @@ fn only_the_configured_owner_can_submit_files_to_the_bot() {
     m.add_document_update(1, 777, 777, "stranger.exe", b"MZ".to_vec()); // someone else's private chat
     m.add_document_update(2, CHAT, 555, "wrong-sender.exe", b"MZ".to_vec()); // right chat id, different sender id
     m.state.lock().unwrap().updates.push(serde_json::json!({"update_id": 3, "message": {"chat": {"id": CHAT, "type": "group"}, "from": {"id": CHAT}, "document": {"file_id": "FILE1", "file_name": "group.exe", "file_size": 2}}}));
-    assert!(until(15, || r.svc.health().rejected_submissions >= 3), "rejected: {} | events: {:?} | telegram calls: {:?}", r.svc.health().rejected_submissions, r.store.recent_events(10).unwrap(), m.state.lock().unwrap().calls);
+    // Two private-chat strangers are rejected and counted. The group message is not an owner submission either: it takes the
+    // Group Shield path, which (switched off here) ignores it. In every case nothing is scanned and nobody gets a reply.
+    assert!(until(15, || r.svc.health().rejected_submissions >= 2 && r.store.kv_get("tg_offset").as_deref() == Some("4")), "rejected: {} | events: {:?} | telegram calls: {:?}", r.svc.health().rejected_submissions, r.store.recent_events(10).unwrap(), m.state.lock().unwrap().calls);
     std::thread::sleep(Duration::from_secs(2));
+    assert!(r.store.groups_list().unwrap().iter().all(|g| !g.enabled), "a group message must never switch protection on");
     assert!(m.sent_texts().is_empty(), "strangers get no reply and nothing is scanned: {:?}", m.sent_texts());
     assert!(!r.tmp.exists() || std::fs::read_dir(&r.tmp).unwrap().count() == 0);
     assert_eq!(r.hooks.count(), 0);

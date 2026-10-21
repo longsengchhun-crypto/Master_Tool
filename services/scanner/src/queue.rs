@@ -115,6 +115,11 @@ pub struct OutboxRow {
     pub last_error: Option<String>,
     pub created_at: i64,
     pub sent_at: Option<i64>,
+    /// None means the owner's own chat; Some is a group the bot was added to.
+    #[serde(skip)]
+    pub chat_id: Option<i64>,
+    #[serde(skip)]
+    pub reply_to: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -160,7 +165,36 @@ CREATE TABLE IF NOT EXISTS outbox(
 CREATE INDEX IF NOT EXISTS outbox_due ON outbox(state, next_attempt_at);
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, kind TEXT NOT NULL, severity TEXT NOT NULL, message TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS tg_groups(
+  chat_id INTEGER PRIMARY KEY, title TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'group',
+  enabled INTEGER NOT NULL DEFAULT 0, auto_delete INTEGER NOT NULL DEFAULT 0,
+  report_clean INTEGER NOT NULL DEFAULT 0, report_incomplete INTEGER NOT NULL DEFAULT 1,
+  enabled_by INTEGER, enabled_at INTEGER, delete_consent_by INTEGER, delete_consent_at INTEGER,
+  bot_status TEXT NOT NULL DEFAULT 'member', joined_at INTEGER NOT NULL, left_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS tg_group_scans(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL,
+  file_unique_id TEXT, sha256 TEXT, size INTEGER, verdict TEXT NOT NULL, complete INTEGER NOT NULL,
+  outcome TEXT NOT NULL, action TEXT, ts INTEGER NOT NULL, UNIQUE(chat_id, message_id)
+);
+CREATE INDEX IF NOT EXISTS tg_group_scans_chat ON tg_group_scans(chat_id, ts);
 "#;
+
+/// Columns added after the first release. Existing databases are upgraded in place.
+fn migrate(c: &Connection) -> Result<(), StoreError> {
+    let has = |table: &str, col: &str| -> Result<bool, StoreError> {
+        let mut st = c.prepare(&format!("PRAGMA table_info({table})"))?;
+        let names = st.query_map([], |r| r.get::<_, String>(1))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(names.iter().any(|n| n == col))
+    };
+    if !has("outbox", "chat_id")? {
+        c.execute("ALTER TABLE outbox ADD COLUMN chat_id INTEGER", [])?;
+    }
+    if !has("outbox", "reply_to")? {
+        c.execute("ALTER TABLE outbox ADD COLUMN reply_to INTEGER", [])?;
+    }
+    Ok(())
+}
 
 impl JobStore {
     pub fn open(path: &Path) -> Result<Self, StoreError> {
@@ -169,12 +203,14 @@ impl JobStore {
         c.pragma_update(None, "synchronous", "NORMAL")?;
         c.busy_timeout(std::time::Duration::from_secs(5))?;
         c.execute_batch(SCHEMA)?;
+        migrate(&c)?;
         Ok(JobStore { conn: Mutex::new(c) })
     }
 
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let c = Connection::open_in_memory()?;
         c.execute_batch(SCHEMA)?;
+        migrate(&c)?;
         Ok(JobStore { conn: Mutex::new(c) })
     }
 
@@ -380,6 +416,11 @@ impl JobStore {
 
     /// Queue a notification. `dedupe_key` makes a repeated event a no-op (returns false).
     pub fn enqueue_notification(&self, dedupe_key: &str, kind: &str, text: &str, now: i64) -> Result<bool, StoreError> {
+        self.enqueue_notification_to(dedupe_key, kind, text, now, None, None)
+    }
+
+    /// Queue a message for the owner's chat (`chat_id` None) or for a group, optionally as a reply to `reply_to`.
+    pub fn enqueue_notification_to(&self, dedupe_key: &str, kind: &str, text: &str, now: i64, chat_id: Option<i64>, reply_to: Option<i64>) -> Result<bool, StoreError> {
         let (created, full) = {
             let c = self.conn.lock().unwrap();
             let pending: i64 = c.query_row("SELECT count(*) FROM outbox WHERE state='pending'", [], |r| r.get(0))?;
@@ -387,8 +428,8 @@ impl JobStore {
                 (0, true) // bounded: a Telegram outage must not grow storage without limit
             } else {
                 let n = c.execute(
-                    "INSERT OR IGNORE INTO outbox(id, dedupe_key, kind, text, state, next_attempt_at, created_at) VALUES (?1,?2,?3,?4,'pending',?5,?5)",
-                    params![uuid::Uuid::new_v4().to_string(), dedupe_key, kind, text, now],
+                    "INSERT OR IGNORE INTO outbox(id, dedupe_key, kind, text, state, next_attempt_at, created_at, chat_id, reply_to) VALUES (?1,?2,?3,?4,'pending',?5,?5,?6,?7)",
+                    params![uuid::Uuid::new_v4().to_string(), dedupe_key, kind, text, now, chat_id, reply_to],
                 )?;
                 (n, false)
             }
@@ -411,7 +452,7 @@ impl JobStore {
 
     pub fn claim_notifications(&self, now: i64, limit: usize) -> Result<Vec<OutboxRow>, StoreError> {
         let c = self.conn.lock().unwrap();
-        let mut st = c.prepare("SELECT id, kind, text, state, attempts, last_error, created_at, sent_at FROM outbox WHERE state='pending' AND next_attempt_at <= ?1 ORDER BY created_at LIMIT ?2")?;
+        let mut st = c.prepare("SELECT id, kind, text, state, attempts, last_error, created_at, sent_at, chat_id, reply_to FROM outbox WHERE state='pending' AND next_attempt_at <= ?1 ORDER BY created_at LIMIT ?2")?;
         let rows = st.query_map(params![now, limit as i64], outbox_row)?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
@@ -457,9 +498,144 @@ impl JobStore {
 
     pub fn recent_notifications(&self, limit: usize) -> Result<Vec<OutboxRow>, StoreError> {
         let c = self.conn.lock().unwrap();
-        let mut st = c.prepare("SELECT id, kind, text, state, attempts, last_error, created_at, sent_at FROM outbox ORDER BY created_at DESC LIMIT ?1")?;
+        let mut st = c.prepare("SELECT id, kind, text, state, attempts, last_error, created_at, sent_at, chat_id, reply_to FROM outbox ORDER BY created_at DESC LIMIT ?1")?;
         let rows = st.query_map([limit as i64], outbox_row)?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+
+    // ---- Telegram groups (Group Shield) -------------------------------------------------------------------
+    //
+    // Everything here is keyed by the group's chat id and every query filters on it, so one group's settings, history and
+    // counts can never be read or changed through another group. File names and message text are not stored: only the
+    // file's hash, size, verdict and what was done about it.
+
+    pub fn group_joined(&self, chat_id: i64, title: &str, kind: &str, bot_status: &str, now: i64) -> Result<(), StoreError> {
+        let title: String = title.chars().filter(|c| !c.is_control()).take(120).collect();
+        self.conn.lock().unwrap().execute(
+            "INSERT INTO tg_groups(chat_id, title, kind, bot_status, joined_at) VALUES (?1,?2,?3,?4,?5)
+             ON CONFLICT(chat_id) DO UPDATE SET title=?2, kind=?3, bot_status=?4, left_at=NULL",
+            params![chat_id, title, kind, bot_status, now],
+        )?;
+        Ok(())
+    }
+
+    /// The bot was removed (or can no longer post). Settings are kept, but protection is switched off so re-adding the bot
+    /// does not silently re-enable anything.
+    pub fn group_left(&self, chat_id: i64, now: i64) -> Result<(), StoreError> {
+        self.conn.lock().unwrap().execute("UPDATE tg_groups SET left_at=?2, enabled=0, auto_delete=0, bot_status='left' WHERE chat_id=?1", params![chat_id, now])?;
+        Ok(())
+    }
+
+    pub fn group_set_status(&self, chat_id: i64, bot_status: &str) -> Result<(), StoreError> {
+        self.conn.lock().unwrap().execute("UPDATE tg_groups SET bot_status=?2 WHERE chat_id=?1", params![chat_id, bot_status])?;
+        Ok(())
+    }
+
+    pub fn group_get(&self, chat_id: i64) -> Result<Option<Group>, StoreError> {
+        let c = self.conn.lock().unwrap();
+        Ok(c.query_row(GROUP_SELECT_ONE, [chat_id], group_row).optional()?)
+    }
+
+    pub fn groups_list(&self) -> Result<Vec<Group>, StoreError> {
+        let c = self.conn.lock().unwrap();
+        let mut st = c.prepare(&format!("{GROUP_SELECT} ORDER BY title COLLATE NOCASE"))?;
+        let rows = st.query_map([], group_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn group_set_enabled(&self, chat_id: i64, on: bool, by: i64, now: i64) -> Result<bool, StoreError> {
+        let n = self.conn.lock().unwrap().execute(
+            "UPDATE tg_groups SET enabled=?2, enabled_by=?3, enabled_at=?4, auto_delete = CASE WHEN ?2=0 THEN 0 ELSE auto_delete END WHERE chat_id=?1 AND left_at IS NULL",
+            params![chat_id, on as i64, by, now],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Turning deletion on records who agreed and when; turning it off clears that consent.
+    pub fn group_set_auto_delete(&self, chat_id: i64, on: bool, by: i64, now: i64) -> Result<bool, StoreError> {
+        let c = self.conn.lock().unwrap();
+        let n = if on {
+            c.execute("UPDATE tg_groups SET auto_delete=1, delete_consent_by=?2, delete_consent_at=?3 WHERE chat_id=?1 AND enabled=1 AND left_at IS NULL", params![chat_id, by, now])?
+        } else {
+            c.execute("UPDATE tg_groups SET auto_delete=0, delete_consent_by=NULL, delete_consent_at=NULL WHERE chat_id=?1", params![chat_id])?
+        };
+        Ok(n > 0)
+    }
+
+    pub fn group_set_report(&self, chat_id: i64, clean: Option<bool>, incomplete: Option<bool>) -> Result<(), StoreError> {
+        let c = self.conn.lock().unwrap();
+        if let Some(v) = clean {
+            c.execute("UPDATE tg_groups SET report_clean=?2 WHERE chat_id=?1", params![chat_id, v as i64])?;
+        }
+        if let Some(v) = incomplete {
+            c.execute("UPDATE tg_groups SET report_incomplete=?2 WHERE chat_id=?1", params![chat_id, v as i64])?;
+        }
+        Ok(())
+    }
+
+    /// Has this message already been handled? (Telegram can redeliver updates.)
+    pub fn group_scan_seen(&self, chat_id: i64, message_id: i64) -> Result<bool, StoreError> {
+        let c = self.conn.lock().unwrap();
+        Ok(c.query_row("SELECT 1 FROM tg_group_scans WHERE chat_id=?1 AND message_id=?2", params![chat_id, message_id], |_| Ok(())).optional()?.is_some())
+    }
+
+    /// Record the outcome for one message. Returns false if that message was already recorded.
+    #[allow(clippy::too_many_arguments)]
+    pub fn group_record_scan(&self, chat_id: i64, message_id: i64, file_unique_id: Option<&str>, sha256: &str, size: u64, verdict: &str, complete: bool, outcome: &str, action: Option<&str>, now: i64) -> Result<bool, StoreError> {
+        let n = self.conn.lock().unwrap().execute(
+            "INSERT OR IGNORE INTO tg_group_scans(chat_id, message_id, file_unique_id, sha256, size, verdict, complete, outcome, action, ts) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+            params![chat_id, message_id, file_unique_id, sha256, size as i64, verdict, complete as i64, outcome, action, now],
+        )?;
+        Ok(n > 0)
+    }
+
+    pub fn group_stats(&self, chat_id: i64, since: i64) -> Result<GroupStats, StoreError> {
+        let c = self.conn.lock().unwrap();
+        let n = |sql: &str| -> Result<i64, StoreError> { Ok(c.query_row(sql, params![chat_id, since], |r| r.get(0))?) };
+        Ok(GroupStats {
+            scans: n("SELECT count(*) FROM tg_group_scans WHERE chat_id=?1 AND ts>=?2 AND outcome='scanned'")?,
+            threats: n("SELECT count(*) FROM tg_group_scans WHERE chat_id=?1 AND ts>=?2 AND verdict='MALICIOUS'")?,
+            suspicious: n("SELECT count(*) FROM tg_group_scans WHERE chat_id=?1 AND ts>=?2 AND verdict='SUSPICIOUS'")?,
+            // Scanned but not completely checked. Skipped and failed files are counted separately, never twice.
+            unverified: n("SELECT count(*) FROM tg_group_scans WHERE chat_id=?1 AND ts>=?2 AND outcome='scanned' AND verdict='UNABLE_TO_VERIFY'")?,
+            skipped: n("SELECT count(*) FROM tg_group_scans WHERE chat_id=?1 AND ts>=?2 AND outcome IN ('skipped_size','skipped_rate')")?,
+            errors: n("SELECT count(*) FROM tg_group_scans WHERE chat_id=?1 AND ts>=?2 AND outcome IN ('unavailable','error')")?,
+            last_scan_at: c.query_row("SELECT max(ts) FROM tg_group_scans WHERE chat_id=?1 AND outcome='scanned'", [chat_id], |r| r.get(0))?,
+        })
+    }
+
+    /// Counts across all groups, for the optional console heartbeat. Numbers only: no ids, titles or names.
+    pub fn group_totals(&self, since: i64) -> Result<GroupTotals, StoreError> {
+        let c = self.conn.lock().unwrap();
+        let n = |sql: &str, p: &[&dyn rusqlite::ToSql]| -> Result<i64, StoreError> { Ok(c.query_row(sql, p, |r| r.get(0))?) };
+        Ok(GroupTotals {
+            registered: n("SELECT count(*) FROM tg_groups WHERE left_at IS NULL", &[])?,
+            protected: n("SELECT count(*) FROM tg_groups WHERE left_at IS NULL AND enabled=1", &[])?,
+            auto_delete: n("SELECT count(*) FROM tg_groups WHERE left_at IS NULL AND enabled=1 AND auto_delete=1", &[])?,
+            scans: n("SELECT count(*) FROM tg_group_scans WHERE ts>=?1 AND outcome='scanned'", &[&since])?,
+            threats: n("SELECT count(*) FROM tg_group_scans WHERE ts>=?1 AND verdict='MALICIOUS'", &[&since])?,
+            errors: n("SELECT count(*) FROM tg_group_scans WHERE ts>=?1 AND outcome IN ('unavailable','error')", &[&since])?,
+        })
+    }
+
+    pub fn group_forget(&self, chat_id: i64) -> Result<(), StoreError> {
+        let c = self.conn.lock().unwrap();
+        c.execute("DELETE FROM tg_group_scans WHERE chat_id=?1", [chat_id])?;
+        c.execute("DELETE FROM tg_groups WHERE chat_id=?1", [chat_id])?;
+        c.execute("DELETE FROM outbox WHERE chat_id=?1", [chat_id])?;
+        Ok(())
+    }
+
+    /// Used when the bot is disconnected: nothing about the groups should outlive the credentials.
+    pub fn groups_clear(&self) {
+        let c = self.conn.lock().unwrap();
+        let _ = c.execute("DELETE FROM tg_group_scans", []);
+        let _ = c.execute("DELETE FROM tg_groups", []);
+    }
+
+    pub fn prune_group_scans(&self, now: i64) -> usize {
+        self.conn.lock().unwrap().execute("DELETE FROM tg_group_scans WHERE ts < ?1", [now - 30 * 86_400_000]).unwrap_or(0)
     }
 
     /// Remove every stored message text (used when the bot is disconnected: messages may name private files).
@@ -468,8 +644,76 @@ impl JobStore {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Group {
+    #[serde(skip)]
+    pub chat_id: i64,
+    pub title: String,
+    pub kind: String,
+    pub enabled: bool,
+    pub auto_delete: bool,
+    pub report_clean: bool,
+    pub report_incomplete: bool,
+    #[serde(skip)]
+    pub enabled_by: Option<i64>,
+    pub enabled_at: Option<i64>,
+    #[serde(skip)]
+    pub delete_consent_by: Option<i64>,
+    pub delete_consent_at: Option<i64>,
+    /// What the bot is in that group: member, administrator, left.
+    pub bot_status: String,
+    pub joined_at: i64,
+    pub left_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupStats {
+    pub scans: i64,
+    pub threats: i64,
+    pub suspicious: i64,
+    pub unverified: i64,
+    pub skipped: i64,
+    pub errors: i64,
+    pub last_scan_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupTotals {
+    pub registered: i64,
+    pub protected: i64,
+    pub auto_delete: i64,
+    pub scans: i64,
+    pub threats: i64,
+    pub errors: i64,
+}
+
+const GROUP_SELECT: &str = "SELECT chat_id, title, kind, enabled, auto_delete, report_clean, report_incomplete, enabled_by, enabled_at, delete_consent_by, delete_consent_at, bot_status, joined_at, left_at FROM tg_groups";
+const GROUP_SELECT_ONE: &str = "SELECT chat_id, title, kind, enabled, auto_delete, report_clean, report_incomplete, enabled_by, enabled_at, delete_consent_by, delete_consent_at, bot_status, joined_at, left_at FROM tg_groups WHERE chat_id = ?1";
+
+fn group_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Group> {
+    Ok(Group {
+        chat_id: r.get(0)?,
+        title: r.get(1)?,
+        kind: r.get(2)?,
+        enabled: r.get::<_, i64>(3)? == 1,
+        auto_delete: r.get::<_, i64>(4)? == 1,
+        report_clean: r.get::<_, i64>(5)? == 1,
+        report_incomplete: r.get::<_, i64>(6)? == 1,
+        enabled_by: r.get(7)?,
+        enabled_at: r.get(8)?,
+        delete_consent_by: r.get(9)?,
+        delete_consent_at: r.get(10)?,
+        bot_status: r.get(11)?,
+        joined_at: r.get(12)?,
+        left_at: r.get(13)?,
+    })
+}
+
 fn outbox_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<OutboxRow> {
-    Ok(OutboxRow { id: r.get(0)?, kind: r.get(1)?, text: r.get(2)?, state: r.get(3)?, attempts: r.get(4)?, last_error: r.get(5)?, created_at: r.get(6)?, sent_at: r.get(7)? })
+    Ok(OutboxRow { id: r.get(0)?, kind: r.get(1)?, text: r.get(2)?, state: r.get(3)?, attempts: r.get(4)?, last_error: r.get(5)?, created_at: r.get(6)?, sent_at: r.get(7)?, chat_id: r.get(8)?, reply_to: r.get(9)? })
 }
 
 #[cfg(test)]

@@ -80,7 +80,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const seen = new Set<string>();
       const out: ScanReport[] = [];
       for (const r of h) {
-        if (r.verdict !== 'MALICIOUS' || r.quarantined) continue;
+        // Files received through Telegram groups or the bot are scanned from memory and removed: there is nothing on disk to act on.
+        if (r.verdict !== 'MALICIOUS' || r.quarantined || r.file.path.startsWith('[')) continue;
         const k = r.file.sha256 || r.file.path;
         if (!seen.has(k)) {
           seen.add(k);

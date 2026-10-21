@@ -9,7 +9,7 @@ export const GET = handle(async (_req, ctx: { params: Promise<{ id: string }> })
   const id = uuidParam((await ctx.params).id);
   const [d] = await q(
     `SELECT d.id, d.org_id, o.name AS org_name, d.hostname, d.os, d.os_version, d.app_version, d.engine_version,
-            d.intel_version, d.intel_updated_at, d.protection, d.queue, d.telegram, d.status, d.last_seen_at, d.created_at
+            d.intel_version, d.intel_updated_at, d.protection, d.queue, d.telegram, d.tg_groups, d.status, d.last_seen_at, d.created_at
        FROM devices d JOIN organizations o ON o.id = d.org_id WHERE d.id = $1`,
     [id],
   );

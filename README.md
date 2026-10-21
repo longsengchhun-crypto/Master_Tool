@@ -20,6 +20,7 @@ A Windows desktop file-protection product with a centralized, independently depl
 | Honest protection status: monitor/queue/engine health, files that **could not be checked**, whether protection resumes after restart | Implemented |
 | Reports to **your own Telegram bot** (token DPAPI-protected, delivery queue with retries); optional files-to-bot scanning | Implemented; tested against a local Bot API **test double**, not live Telegram ([docs/TELEGRAM.md](docs/TELEGRAM.md)) |
 | Telegram Desktop download-folder scanning with source labels | Implemented, tested |
+| **Group Shield**: scans files posted in Telegram groups the owner's bot is in; optional consented deletion of malicious messages | Implemented; tested against a test double and real ClamAV, not live Telegram; runs on the owner's PC ([docs/GROUP_SHIELD.md](docs/GROUP_SHIELD.md)) |
 | **Telegram account monitoring** | **Not implemented** (needs an audited MTProto client, your own `api_id` and a test account). Nothing is collected for it |
 | Execution guard: reversible deny-execute permission on a confirmed-malicious file | Implemented, tested (a guarded file really fails to launch) |
 | Encrypted quarantine, tamper-evident metadata and audit log, confirmed restore | Implemented, tested |
@@ -102,4 +103,4 @@ Authenticode status truthfully (currently UNSIGNED). See [docs/BUILD.md](docs/BU
 [Detection and verdict rules](docs/DETECTION.md) · [Platform support](docs/PLATFORM_SUPPORT.md) ·
 [Build and release](docs/BUILD.md) · [Operations, backup, retention](docs/OPERATIONS.md) ·
 [Key management](docs/KEY_MANAGEMENT.md) · [Incident response](docs/INCIDENT_RESPONSE.md) ·
-[Telegram integration](docs/TELEGRAM.md) · [Phase 2 gap analysis](docs/PHASE2_GAP_ANALYSIS.md) · [API](docs/API.md) · [Performance (measured)](docs/PERFORMANCE.md) · [Environment variables](docs/ENVIRONMENT.md) · [Checklist and known limitations](docs/CHECKLIST.md)
+[Telegram integration](docs/TELEGRAM.md) · [Group Shield](docs/GROUP_SHIELD.md) · [Phase 3 gap analysis](docs/PHASE3_GAP_ANALYSIS.md) · [Phase 2 gap analysis](docs/PHASE2_GAP_ANALYSIS.md) · [API](docs/API.md) · [Performance (measured)](docs/PERFORMANCE.md) · [Environment variables](docs/ENVIRONMENT.md) · [Checklist and known limitations](docs/CHECKLIST.md)

@@ -162,7 +162,8 @@ pub fn deliver_due_at(store: &JobStore, client: &BotClient, chat_id: i64, max: u
         if i > 0 && !min_gap.is_zero() {
             std::thread::sleep(min_gap);
         }
-        match client.send_message(chat_id, &n.text) {
+        let target = n.chat_id.unwrap_or(chat_id);
+        match client.send_reply(target, &n.text, n.reply_to) {
             Ok(_) => {
                 let _ = store.notification_sent(&n.id, now);
                 d.sent += 1;
@@ -182,6 +183,11 @@ pub fn deliver_due_at(store: &JobStore, client: &BotClient, chat_id: i64, max: u
                     }
                 } else {
                     let _ = store.notification_dead(&n.id, &msg, now);
+                    // 403 from a group means the bot was removed or muted there: stop protecting it instead of failing forever.
+                    if let (Some(g), TgError::Api { code: 403, .. }) = (n.chat_id, &e) {
+                        let _ = store.group_left(g, now);
+                        store.add_event("group_removed", "warning", "The bot can no longer post in a group (removed or blocked). Protection for it was turned off.", now);
+                    }
                     store.add_event("telegram_delivery", "warning", &format!("Telegram refused a report: {}", e.user_message()), now);
                     d.dead += 1;
                 }

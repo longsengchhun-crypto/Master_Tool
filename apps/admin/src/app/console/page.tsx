@@ -59,10 +59,16 @@ export default function Overview() {
               <Metric label="Devices with a scan backlog" value={f.devices_with_backlog} tone="warn" />
             </Rows>
           </Section>
-          <Section title="Telegram">
+          <Section title="Telegram and groups">
             <Rows>
               <Metric label="Bots connected" value={f.telegram_bots_connected} hint="Counts only: never tokens or chats" />
               <Metric label="Devices with delivery failures (24 h)" value={f.telegram_delivery_failures} tone="warn" hint="Devices with undelivered reports" />
+              <Metric label="Groups registered" value={f.tg_groups_registered} hint="Counts only: never group names or members" />
+              <Metric label="Groups protected" value={f.tg_groups_protected} hint="An administrator of the group turned protection on" />
+              <Metric label="Groups with automatic deletion" value={f.tg_groups_auto_delete} />
+              <Metric label="Group files scanned (24 h)" value={f.tg_group_scans_24h} />
+              <Metric label="Group threats found (24 h)" value={f.tg_group_threats_24h} tone="danger" />
+              <Metric label="Group scan errors (24 h)" value={f.tg_group_errors_24h} tone="warn" hint="Files that could not be downloaded or scanned" />
             </Rows>
           </Section>
         </div>

@@ -25,7 +25,14 @@ export const GET = handle(async () => {
             count(*) FILTER (WHERE status = 'enrolled' AND COALESCE((queue->>'stuck')::int, 0) > 0) AS devices_with_stuck_scans,
             count(*) FILTER (WHERE status = 'enrolled' AND COALESCE((queue->>'queued')::int, 0) > 0) AS devices_with_backlog,
             count(*) FILTER (WHERE status = 'enrolled' AND telegram->>'botConnected' = 'true') AS telegram_bots_connected,
-            count(*) FILTER (WHERE status = 'enrolled' AND COALESCE((telegram->>'deliveryFailures24h')::int, 0) > 0) AS telegram_delivery_failures
+            count(*) FILTER (WHERE status = 'enrolled' AND COALESCE((telegram->>'deliveryFailures24h')::int, 0) > 0) AS telegram_delivery_failures,
+            -- Group Shield (device-reported counts only)
+            COALESCE(sum((tg_groups->>'registered')::int) FILTER (WHERE status = 'enrolled'), 0) AS tg_groups_registered,
+            COALESCE(sum((tg_groups->>'protected')::int) FILTER (WHERE status = 'enrolled'), 0) AS tg_groups_protected,
+            COALESCE(sum((tg_groups->>'autoDelete')::int) FILTER (WHERE status = 'enrolled'), 0) AS tg_groups_auto_delete,
+            COALESCE(sum((tg_groups->>'scans24h')::int) FILTER (WHERE status = 'enrolled'), 0) AS tg_group_scans_24h,
+            COALESCE(sum((tg_groups->>'threats24h')::int) FILTER (WHERE status = 'enrolled'), 0) AS tg_group_threats_24h,
+            COALESCE(sum((tg_groups->>'errors24h')::int) FILTER (WHERE status = 'enrolled'), 0) AS tg_group_errors_24h
        FROM devices WHERE ($1::uuid[] IS NULL OR org_id = ANY($1))`,
     [scope],
   );

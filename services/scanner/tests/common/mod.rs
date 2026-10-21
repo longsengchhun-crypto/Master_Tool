@@ -33,7 +33,24 @@ pub struct State {
     pub files: HashMap<String, Vec<u8>>,
     /// getFile reports this size instead of the real one (to test a lying server).
     pub lie_about_size: HashMap<String, u64>,
+    /// Simulated groups the bot is in, by chat id.
+    pub groups: HashMap<i64, GroupSim>,
+    /// (chat, message) pairs the bot successfully deleted.
+    pub deleted: Vec<(i64, i64)>,
+    /// reply_to of each entry in `sent`.
+    pub reply_to: Vec<Option<i64>>,
+    /// BotFather privacy mode: when true, getMe reports can_read_all_group_messages = false.
+    pub privacy_on: bool,
 }
+
+#[derive(Debug, Clone, Default)]
+pub struct GroupSim {
+    pub admins: Vec<i64>,
+    pub bot_admin: bool,
+    pub bot_can_delete: bool,
+}
+
+pub const BOT_ID: i64 = 123456789;
 
 pub struct Mock {
     pub base: String,
@@ -80,6 +97,70 @@ impl Mock {
 
     pub fn add_text_update(&self, update_id: i64, chat: i64, from: i64, text: &str) {
         self.state.lock().unwrap().updates.push(json!({"update_id": update_id, "message": {"chat": {"id": chat, "type": "private"}, "from": {"id": from}, "text": text}}));
+    }
+
+    pub fn add_group(&self, chat: i64, admins: &[i64], bot_admin: bool, bot_can_delete: bool) {
+        self.state.lock().unwrap().groups.insert(chat, GroupSim { admins: admins.to_vec(), bot_admin, bot_can_delete });
+    }
+
+    pub fn set_bot_can_delete(&self, chat: i64, v: bool) {
+        if let Some(g) = self.state.lock().unwrap().groups.get_mut(&chat) {
+            g.bot_can_delete = v;
+        }
+    }
+
+    pub fn add_bot_joined(&self, update_id: i64, chat: i64, title: &str, by: i64) {
+        self.state.lock().unwrap().updates.push(json!({"update_id": update_id, "my_chat_member": {"chat": {"id": chat, "type": "supergroup", "title": title}, "from": {"id": by}, "old_chat_member": {"status": "left"}, "new_chat_member": {"status": "member"}}}));
+    }
+
+    pub fn add_bot_removed(&self, update_id: i64, chat: i64, title: &str) {
+        self.state.lock().unwrap().updates.push(json!({"update_id": update_id, "my_chat_member": {"chat": {"id": chat, "type": "supergroup", "title": title}, "from": {"id": 1}, "old_chat_member": {"status": "member"}, "new_chat_member": {"status": "kicked"}}}));
+    }
+
+    pub fn add_group_text(&self, update_id: i64, chat: i64, message_id: i64, from: i64, text: &str) {
+        self.state.lock().unwrap().updates.push(json!({"update_id": update_id, "message": {"message_id": message_id, "chat": {"id": chat, "type": "supergroup", "title": "Test group"}, "from": {"id": from}, "text": text}}));
+    }
+
+    /// An administrator posting anonymously: the "sender" is the group itself.
+    pub fn add_anonymous_group_text(&self, update_id: i64, chat: i64, message_id: i64, text: &str) {
+        self.state.lock().unwrap().updates.push(json!({"update_id": update_id, "message": {"message_id": message_id, "chat": {"id": chat, "type": "supergroup", "title": "Test group"}, "from": {"id": 1087}, "sender_chat": {"id": chat, "type": "supergroup"}, "text": text}}));
+    }
+
+    /// `advertised_size` lets a test claim a size different from the real bytes.
+    pub fn add_group_document(&self, update_id: i64, chat: i64, message_id: i64, from: i64, name: &str, bytes: Vec<u8>, advertised_size: Option<u64>) {
+        let mut s = self.state.lock().unwrap();
+        let id = format!("GFILE{update_id}");
+        let size = advertised_size.unwrap_or(bytes.len() as u64);
+        s.files.insert(id.clone(), bytes);
+        s.updates.push(json!({"update_id": update_id, "message": {"message_id": message_id, "chat": {"id": chat, "type": "supergroup", "title": "Test group"}, "from": {"id": from}, "document": {"file_id": id, "file_unique_id": format!("U{update_id}"), "file_name": name, "file_size": size}}}));
+    }
+
+    /// A document whose file Telegram will refuse to serve (expired, deleted, or otherwise inaccessible).
+    pub fn add_group_document_gone(&self, update_id: i64, chat: i64, message_id: i64, from: i64, name: &str) {
+        self.state.lock().unwrap().updates.push(json!({"update_id": update_id, "message": {"message_id": message_id, "chat": {"id": chat, "type": "supergroup", "title": "Test group"}, "from": {"id": from}, "document": {"file_id": "GONE", "file_unique_id": "UGONE", "file_name": name, "file_size": 100}}}));
+    }
+
+    pub fn texts_in(&self, chat: i64) -> Vec<String> {
+        self.state.lock().unwrap().sent.iter().filter(|(c, _)| *c == chat).map(|(_, t)| t.clone()).collect()
+    }
+
+    pub fn deleted(&self) -> Vec<(i64, i64)> {
+        self.state.lock().unwrap().deleted.clone()
+    }
+
+    pub fn called(&self, method: &str) -> usize {
+        self.state.lock().unwrap().calls.iter().filter(|m| m.as_str() == method).count()
+    }
+
+    pub fn wait_for_messages_in(&self, chat: i64, n: usize, secs: u64) -> bool {
+        let end = std::time::Instant::now() + Duration::from_secs(secs);
+        while std::time::Instant::now() < end {
+            if self.texts_in(chat).len() >= n {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        false
     }
 
     pub fn wait_for_messages(&self, n: usize, secs: u64) -> bool {
@@ -153,7 +234,35 @@ fn handle(mut conn: TcpStream, state: Arc<Mutex<State>>) {
         return json_resp(&mut conn, 401, json!({"ok": false, "error_code": 401, "description": "Unauthorized"}));
     }
     match method {
-        "getMe" => json_resp(&mut conn, 200, json!({"ok": true, "result": {"id": 123456789, "is_bot": true, "first_name": "SENTRIX Test", "username": "sentrix_test_bot"}})),
+        "getMe" => {
+            let privacy = state.lock().unwrap().privacy_on;
+            json_resp(&mut conn, 200, json!({"ok": true, "result": {"id": BOT_ID, "is_bot": true, "first_name": "SENTRIX Test", "username": "sentrix_test_bot", "can_join_groups": true, "can_read_all_group_messages": !privacy}}))
+        }
+        "getChatMember" => {
+            let chat = body["chat_id"].as_i64().unwrap_or(0);
+            let user = body["user_id"].as_i64().unwrap_or(0);
+            let s = state.lock().unwrap();
+            let Some(g) = s.groups.get(&chat) else { return json_resp(&mut conn, 400, json!({"ok": false, "error_code": 400, "description": "Bad Request: chat not found"})) };
+            let r = if user == BOT_ID {
+                if g.bot_admin { json!({"status": "administrator", "can_delete_messages": g.bot_can_delete}) } else { json!({"status": "member"}) }
+            } else if g.admins.contains(&user) {
+                json!({"status": "administrator", "can_delete_messages": true})
+            } else {
+                json!({"status": "member"})
+            };
+            json_resp(&mut conn, 200, json!({"ok": true, "result": r}));
+        }
+        "deleteMessage" => {
+            let chat = body["chat_id"].as_i64().unwrap_or(0);
+            let mid = body["message_id"].as_i64().unwrap_or(0);
+            let mut s = state.lock().unwrap();
+            let allowed = s.groups.get(&chat).is_some_and(|g| g.bot_admin && g.bot_can_delete);
+            if !allowed {
+                return json_resp(&mut conn, 400, json!({"ok": false, "error_code": 400, "description": "Bad Request: not enough rights to delete the message"}));
+            }
+            s.deleted.push((chat, mid));
+            json_resp(&mut conn, 200, json!({"ok": true, "result": true}));
+        }
         "sendMessage" => {
             let fail = state.lock().unwrap().send_failures.pop_front();
             match fail {
@@ -163,11 +272,13 @@ fn handle(mut conn: TcpStream, state: Arc<Mutex<State>>) {
                 None => {}
             }
             let chat = body["chat_id"].as_i64().unwrap_or(0);
-            if chat != CHAT {
+            if chat != CHAT && !state.lock().unwrap().groups.contains_key(&chat) {
                 return json_resp(&mut conn, 400, json!({"ok": false, "error_code": 400, "description": "Bad Request: chat not found"}));
             }
             let text = body["text"].as_str().unwrap_or("").to_string();
+            let reply = body["reply_parameters"]["message_id"].as_i64();
             let mut s = state.lock().unwrap();
+            s.reply_to.push(reply);
             s.sent.push((chat, text));
             let id = s.sent.len();
             json_resp(&mut conn, 200, json!({"ok": true, "result": {"message_id": id}}));

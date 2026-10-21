@@ -54,11 +54,15 @@ pub struct TelegramSettings {
     /// Organization policy can forbid these (set from the console policy; the user sees why).
     pub bot_allowed: bool,
     pub account_allowed: bool,
+    /// Group Shield master switch. Off by default: groups are only scanned after the owner turns this on.
+    pub group_shield: bool,
+    /// Organization policy can forbid scanning groups.
+    pub groups_allowed: bool,
 }
 
 impl Default for TelegramSettings {
     fn default() -> Self {
-        TelegramSettings { chat_id: None, bot_username: None, notify: NotifyPrefs::default(), accept_submissions: false, desktop_folder: None, bot_allowed: true, account_allowed: true }
+        TelegramSettings { chat_id: None, bot_username: None, notify: NotifyPrefs::default(), accept_submissions: false, desktop_folder: None, bot_allowed: true, account_allowed: true, group_shield: false, groups_allowed: true }
     }
 }
 

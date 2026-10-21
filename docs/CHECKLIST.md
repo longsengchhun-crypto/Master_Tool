@@ -110,6 +110,22 @@ _Nothing below is claimed without a test or a check named next to it. Results of
 | Threat model / privacy docs | DONE | SECURITY_ARCHITECTURE T23-T32, TELEGRAM.md, in-app Help and Privacy |
 | Performance with real measurements | PARTIAL | Single runs, see [PERFORMANCE.md](PERFORMANCE.md); live Telegram latency and large-queue behaviour not measured |
 
+## Group Shield (Telegram groups)
+
+| Requirement | Status | Evidence / notes |
+|---|---|---|
+| Reuse the existing bot, token, single worker, outbox, scanner; no second poller or webhook | DONE | One worker serves private chat and groups |
+| `/setup`, `/status`, `/help`, `/scanstatus` | DONE | `tests/groups.rs` |
+| Detect and scan group documents with the real engine; failures never CLEAN | DONE (test double + real ClamAV) | 15 + 2 tests |
+| Reports and prompt MALICIOUS alerts in the group | DONE | Real-engine test: alert text, Eicar detection |
+| Optional deletion, off by default, explicit admin consent, permission checks, failure handling | DONE (test double + real ClamAV) | Two-step consent; deletion success/failure both verified |
+| Privacy mode, permissions, 20 MB, rate limits, supported types documented | DONE | [GROUP_SHIELD.md](GROUP_SHIELD.md) |
+| Isolation and authorization by group id | DONE | Cross-group tests; Telegram-confirmed administrators only |
+| Console: registered/protected/scans/threats/errors, no secrets or content | DONE | Migration 004 applied; strict schema; tenant-scoped tests |
+| Works without the owner's computer being on | **NO** | Runs on the owner's PC with the owner's bot. A central bot with server-side scanning is a different product |
+| Verified against **live Telegram** | **NOT TESTED** | No bot or group was available; privacy mode, `getChatMember` and `deleteMessage` behaviour is per Telegram's documentation |
+| Personal Telegram **account** monitoring | **NOT IMPLEMENTED** | Needs TDLib (or another audited MTProto client), an `api_id` and a test account; see [PHASE3_GAP_ANALYSIS.md](PHASE3_GAP_ANALYSIS.md) |
+
 ## What is still missing
 
 1. **Authenticode certificate** (OV/EV or Azure Trusted Signing): without it every download shows SmartScreen warnings.
@@ -128,8 +144,8 @@ _Nothing below is claimed without a test or a check named next to it. Results of
 
 | Suite | Result |
 |---|---|
-| `cargo test --workspace` (core 114, desktop 12, Telegram client/double 9, service pipeline 9, update signatures 6) | 150 passed, 0 failed (7 opt-in tests ignored) |
-| Real ClamAV (`--test engine --test service --test perf -- --ignored`): engine scenarios, 10-scenario Telegram/queue/guard pipeline, perf | passed |
+| `cargo test --workspace` (core 114, desktop 12, Telegram client/double 9, service pipeline 9, Group Shield 15, update signatures 6) | 165 passed, 0 failed (9 opt-in tests ignored) |
+| Real ClamAV (`--test engine --test service --test groups --test perf -- --ignored`): engine scenarios, 10-scenario Telegram/queue/guard pipeline, 2 Group Shield scenarios, perf | passed |
 | Real ClamAV 1.5.4 end to end (`sentrix-core --test engine`, 12 scenarios) | passed |
 | Console unit + integration + security (`apps/admin`, production build, real Postgres in a throwaway schema) | 99 passed, 1 skipped (opt-in desktop e2e) |
 | Rust desktop client ↔ live console e2e (enroll → restart → job → revoke) | passed (run separately with `SENTRIX_E2E_DESKTOP=1`) |

@@ -168,6 +168,52 @@ export function Telegram() {
               description="Send a file to your bot and get the result back. Only your own chat is accepted, files up to 20 MB, and this computer must be on."
             />
           </Card>
+
+          <Card className="overflow-hidden">
+            <div className="px-5 py-1">
+              <Toggle
+                checked={t.groups.shield}
+                disabled={busy === 'groups' || !t.allowed || !t.groups.allowed}
+                onChange={(v) => run('groups', () => api.tgSetGroupShield(v), set)}
+                label="Protect Telegram groups"
+                description={t.groups.allowed ? 'Add your bot to a group. A group administrator then sends /setup on there. Files posted as documents (up to 20 MB) are scanned on this computer, so it must be on.' : 'Your organization does not allow this.'}
+              />
+            </div>
+            {t.groups.shield && t.groups.privacyBlocks && (
+              <div className="border-t border-line px-5 py-3">
+                <Notice tone="warn" title="Telegram is hiding group files from your bot">
+                  Privacy mode is on for your bot, so it only sees commands in groups. Make the bot a group administrator, or in @BotFather send /setprivacy, pick your bot and choose Disable, then add the bot to the group again.
+                </Notice>
+              </div>
+            )}
+            {t.groups.shield && (
+              <div className="border-t border-line">
+                {t.groups.list.length === 0 ? (
+                  <p className="px-5 py-4 text-sm text-muted">No groups yet. Add your bot to a group, then a group administrator sends <span className="font-mono">/setup on</span>.</p>
+                ) : (
+                  <ul className="divide-y divide-line">
+                    {t.groups.list.map((g) => (
+                      <li key={g.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-ink">{g.title || 'Unnamed group'}</div>
+                          <div className="text-xs text-muted">
+                            {g.enabled ? 'Protected' : 'Waiting for a group administrator to send /setup on'}
+                            {g.enabled && g.autoDelete ? ' · deletes malicious files' : ''}
+                            {g.enabled ? ` · ${g.stats.scans} scanned today, ${g.stats.threats} threat${g.stats.threats === 1 ? '' : 's'}${g.stats.errors + g.stats.skipped > 0 ? `, ${g.stats.errors + g.stats.skipped} not checked` : ''}` : ''}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          {g.enabled && <Button disabled={busy === `g${g.id}`} onClick={() => run(`g${g.id}`, () => api.tgGroupDisable(g.id), set)}>Stop</Button>}
+                          <Button variant="danger" disabled={busy === `g${g.id}`} onClick={() => run(`g${g.id}`, () => api.tgGroupLeave(g.id), (s) => { set(s); toast('ok', 'The bot left the group and its local history was removed.'); })}>Leave</Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="border-t border-line px-5 py-3 text-xs text-muted">Photos, videos and files over 20 MB cannot be scanned and are said so in the group. Only a group administrator confirmed by Telegram can change a group's settings, and only that same administrator can agree to automatic deletion.</p>
+              </div>
+            )}
+          </Card>
         </>
       )}
 

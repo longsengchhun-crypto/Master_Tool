@@ -14,6 +14,7 @@ interface Detail {
     created_at: string;
     queue?: { queued: number; failed: number; stuck: number };
     telegram?: { botConnected: boolean; deliveryFailures24h: number; accountState: string };
+    tg_groups?: { registered: number; protected: number; autoDelete: number; scans24h: number; threats24h: number; errors24h: number };
   };
   events: { id: string; kind: string; severity: string; detail: string | null; created_at: string }[];
   sessions: { id: string; kind: string; started_at: string; files_total: number; files_failed: number; complete: boolean }[];
@@ -116,6 +117,13 @@ export default function DevicePage({ params }: { params: Promise<{ id: string }>
             </div>
           ) : (
             <div className="mt-2 text-sm text-muted">Not reported.</div>
+          )}
+          {d.tg_groups && 'registered' in d.tg_groups && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Badge>{d.tg_groups.registered} groups ({d.tg_groups.protected} protected)</Badge>
+              <Badge tone={d.tg_groups.threats24h > 0 ? 'danger' : 'muted'}>{d.tg_groups.threats24h} threats (24 h)</Badge>
+              <Badge tone={d.tg_groups.errors24h > 0 ? 'warn' : 'muted'}>{d.tg_groups.errors24h} errors (24 h)</Badge>
+            </div>
           )}
           <p className="mt-2 text-xs text-muted">Tokens, chat IDs, message text and file contents are never sent to the console.</p>
         </Card>

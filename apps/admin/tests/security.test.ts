@@ -768,3 +768,59 @@ describe('Phase 2 health reporting and Telegram privacy', () => {
     expect(cols.filter((c: string) => /token/.test(c))).toEqual(['token_hash']);
   });
 });
+
+describe('Group Shield reporting, privacy and isolation', () => {
+  const hb = (over: Record<string, unknown>) => ({ ...HEARTBEAT, ...over });
+  const A = { registered: 3, protected: 2, autoDelete: 1, scans24h: 40, threats24h: 2, errors24h: 1 };
+  const B = { registered: 7, protected: 7, autoDelete: 0, scans24h: 90, threats24h: 0, errors24h: 0 };
+
+  it('stores exactly the reported counts', async () => {
+    expect((await devA.client.req('/api/device/heartbeat', { bearer: devA.token, body: hb({ groups: A }) })).status).toBe(200);
+    expect((await devB.client.req('/api/device/heartbeat', { bearer: devB.token, body: hb({ groups: B }) })).status).toBe(200);
+    const [d] = await sql('SELECT tg_groups FROM devices WHERE id = $1', [devA.deviceId]);
+    expect(d.tg_groups).toEqual(A);
+  });
+
+  it('rejects group names, chat ids, member names, file names and malformed numbers', async () => {
+    for (const groups of [
+      { ...A, title: 'Finance team' },
+      { ...A, chatId: -1001234567890 },
+      { ...A, members: ['alice'] },
+      { ...A, lastFile: 'salaries.xlsx' },
+      { ...A, registered: -1 },
+      { ...A, threats24h: 'many' },
+      { registered: 1 },
+    ]) {
+      expect((await devA.client.req('/api/device/heartbeat', { bearer: devA.token, body: hb({ groups }) })).status, JSON.stringify(groups)).toBe(400);
+    }
+    const [d] = await sql('SELECT tg_groups::text AS t FROM devices WHERE id = $1', [devA.deviceId]);
+    expect(d.t).not.toMatch(/Finance|salaries|alice|1001234567890/);
+  });
+
+  it('aggregates are tenant-scoped: an organization never sees another organization\'s groups', async () => {
+    const a = (await adminA.req('/api/admin/overview')).json.operational.fleet;
+    const b = (await adminB.req('/api/admin/overview')).json.operational.fleet;
+    expect(Number(a.tg_groups_registered)).toBe(A.registered);
+    expect(Number(a.tg_group_threats_24h)).toBe(A.threats24h);
+    expect(Number(b.tg_groups_registered)).toBe(B.registered);
+    expect(Number(b.tg_group_threats_24h)).toBe(0);
+    const all = (await sup.req('/api/admin/overview')).json.operational.fleet;
+    expect(Number(all.tg_groups_registered)).toBeGreaterThanOrEqual(A.registered + B.registered);
+    expect(JSON.stringify([a, b])).not.toMatch(/title|chat_?id|member/i);
+  });
+
+  it('device detail shows the counts to the owning organization only', async () => {
+    const own = await adminA.req(`/api/admin/devices/${devA.deviceId}`);
+    expect(own.status).toBe(200);
+    expect(own.json.device.tg_groups).toEqual(A);
+    expect((await adminB.req(`/api/admin/devices/${devA.deviceId}`)).status).toBe(404);
+  });
+
+  it('an organization can forbid group protection; the flag is validated and delivered', async () => {
+    expect((await sup.req('/api/admin/policies', { method: 'PUT', body: { orgId: orgA, config: { telegramGroupsAllowed: false } } })).status).toBe(200);
+    expect((await devA.client.req('/api/device/heartbeat', { bearer: devA.token, body: hb({}) })).json.policy.telegramGroupsAllowed).toBe(false);
+    expect((await sup.req('/api/admin/policies', { method: 'PUT', body: { orgId: orgA, config: { telegramGroupsAllowed: 'no' } } })).status).toBe(400);
+    expect((await devB.client.req('/api/device/heartbeat', { bearer: devB.token, body: hb({}) })).json.policy.telegramGroupsAllowed).toBe(true);
+    await sup.req('/api/admin/policies', { method: 'PUT', body: { orgId: orgA, config: {} } });
+  });
+});

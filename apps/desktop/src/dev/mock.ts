@@ -79,7 +79,7 @@ const QUAR: QuarantineRecord[] = [
 
 const NOTIFY: NotifyPrefs = { malicious: true, suspicious: true, unableToVerify: false, cleanScans: false, quarantined: true, engineProblems: true, protectionStopped: true, accountEvents: true, includeHash: true };
 const settings = (over: Partial<Settings> = {}): Settings => ({ realtimeMonitoring: true, monitoredFolders: ['downloads', 'desktop'], customFolders: [], autoQuarantine: 'off', allowRestoreSuspicious: true, notifications: true, maxFileSizeMb: 512, archiveMaxDepth: 3, telemetryEnabled: false, theme: 'system', onboardingDone: true, executionGuard: false,
-  telegram: { chatId: null, botUsername: null, notify: NOTIFY, acceptSubmissions: false, desktopFolder: null, botAllowed: true, accountAllowed: false }, ...over });
+  telegram: { chatId: null, botUsername: null, notify: NOTIFY, acceptSubmissions: false, desktopFolder: null, botAllowed: true, accountAllowed: false, groupShield: false, groupsAllowed: true }, ...over });
 
 function status(scn: string): AppStatus {
   const healthy = scn === 'healthy' || scn === 'managed' || scn === 'onboarding';
@@ -138,7 +138,15 @@ function telegram(scn: string): TelegramStatus {
     acceptSubmissions: scn === 'healthy', notify: NOTIFY,
     desktop: { detection: { installed: true, evidence: ['C:\Users\Sample\AppData\Roaming\Telegram Desktop'], candidates: [{ path: 'C:\Users\Sample\Downloads\Telegram Desktop', exists: true, fileCount: 18 }] }, folder: connected ? 'C:\Users\Sample\Downloads\Telegram Desktop' : null, exists: true, watching: connected && !bad, error: null, scanned: connected ? 18 : 0, threats: connected ? 1 : 0 },
     account: { state: 'not_available', detail: 'Account-level monitoring is not implemented in this build: it needs a vetted Telegram client library and your own API credentials, and has not been security-audited or tested against a real account.' },
-    accountAllowed: false, rejectedSubmissions: 0,
+    accountAllowed: false,
+    groups: {
+      shield: connected, allowed: true, privacyBlocks: scn === 'stopped',
+      list: connected ? [
+        { id: -1001111, title: 'Design team', kind: 'supergroup', enabled: true, autoDelete: true, reportClean: false, reportIncomplete: true, enabledAt: min(900), deleteConsentAt: min(880), botStatus: 'administrator', joinedAt: min(2000), stats: { scans: 14, threats: 1, suspicious: 0, unverified: 1, skipped: 0, errors: 0, lastScanAt: min(12) } },
+        { id: -1002222, title: 'Family chat', kind: 'group', enabled: false, autoDelete: false, reportClean: false, reportIncomplete: true, enabledAt: null, deleteConsentAt: null, botStatus: 'member', joinedAt: min(300), stats: { scans: 0, threats: 0, suspicious: 0, unverified: 0, skipped: 0, errors: 0, lastScanAt: null } },
+      ] : [],
+    },
+    rejectedSubmissions: 0,
     recentNotifications: connected ? [
       { id: 'n1', kind: 'threat_malicious', text: '', state: 'sent', attempts: 1, lastError: null, createdAt: min(5), sentAt: min(4) },
       ...(bad ? [{ id: 'n2', kind: 'engine_problem', text: '', state: 'pending' as const, attempts: 3, lastError: 'Telegram could not be reached (network error).', createdAt: min(120), sentAt: null }] : []),
@@ -175,6 +183,9 @@ export function installMock() {
     tg_detect_chat: () => [1234567421],
     tg_test_connection: () => telegram(scn),
     tg_set_options: () => telegram(scn),
+    tg_set_group_shield: () => telegram(scn),
+    tg_group_disable: () => telegram(scn),
+    tg_group_leave: () => telegram(scn),
     tg_detect_desktop: () => telegram(scn).desktop.detection,
     start_engine: () => status(scn).engine,
     get_settings: () => settings(),

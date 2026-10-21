@@ -21,6 +21,7 @@ const DEFAULT = {
   maxIntelAgeHours: 48,
   telegramBotAllowed: true,
   telegramAccountAllowed: true,
+  telegramGroupsAllowed: true,
 };
 
 export default function Policies() {

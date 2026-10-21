@@ -95,6 +95,8 @@ export interface Settings {
     desktopFolder: string | null;
     botAllowed: boolean;
     accountAllowed: boolean;
+    groupShield: boolean;
+    groupsAllowed: boolean;
   };
 }
 
@@ -313,6 +315,40 @@ export interface TelegramStatus {
   desktop: { detection: Detection; folder: string | null; exists: boolean; watching: boolean; error: string | null; scanned: number; threats: number };
   account: { state: 'not_available' | 'disconnected' | 'connected' | 'expired'; detail?: string };
   accountAllowed: boolean;
+  groups: GroupsStatus;
   rejectedSubmissions: number;
   recentNotifications: OutboxRow[];
+}
+export interface GroupStats {
+  scans: number;
+  threats: number;
+  suspicious: number;
+  unverified: number;
+  skipped: number;
+  errors: number;
+  lastScanAt: number | null;
+}
+
+export interface GroupView {
+  id: number;
+  title: string;
+  kind: string;
+  enabled: boolean;
+  autoDelete: boolean;
+  reportClean: boolean;
+  reportIncomplete: boolean;
+  enabledAt: number | null;
+  deleteConsentAt: number | null;
+  /** member, administrator, left */
+  botStatus: string;
+  joinedAt: number;
+  stats: GroupStats;
+}
+
+export interface GroupsStatus {
+  shield: boolean;
+  allowed: boolean;
+  /** Telegram privacy mode hides ordinary group messages from the bot (null = not known yet). */
+  privacyBlocks: boolean | null;
+  list: GroupView[];
 }

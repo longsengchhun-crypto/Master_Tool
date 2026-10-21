@@ -52,6 +52,7 @@ pub fn build_config(st: &AppState) -> ServiceConfig {
     c.notify = s.telegram.notify.clone();
     c.chat_id = if bot_ok { s.telegram.chat_id } else { None };
     c.accept_submissions = bot_ok && s.telegram.accept_submissions;
+    c.group_shield = bot_ok && s.telegram.group_shield && s.telegram.groups_allowed;
     c
 }
 
@@ -162,8 +163,21 @@ pub struct TelegramStatus {
     pub desktop: DesktopStatus,
     pub account: AccountState,
     pub account_allowed: bool,
+    pub groups: GroupsStatus,
     pub rejected_submissions: u64,
     pub recent_notifications: Vec<sentrix_core::queue::OutboxRow>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupsStatus {
+    /// The owner's master switch.
+    pub shield: bool,
+    /// Organization policy.
+    pub allowed: bool,
+    /// Telegram privacy mode hides ordinary group messages from the bot (None = not known yet).
+    pub privacy_blocks: Option<bool>,
+    pub list: Vec<sentrix_core::service::GroupView>,
 }
 
 fn mask_chat(id: i64) -> String {
@@ -220,6 +234,7 @@ pub fn telegram_status(st: &AppState) -> TelegramStatus {
         },
         account: NotAvailable.state(),
         account_allowed: s.telegram.account_allowed,
+        groups: GroupsStatus { shield: s.telegram.group_shield && s.telegram.groups_allowed, allowed: s.telegram.groups_allowed, privacy_blocks: st.service.privacy_mode_blocks(), list: st.service.groups_view() },
         rejected_submissions: health.rejected_submissions,
         recent_notifications: st.jobs.recent_notifications(15).unwrap_or_default(),
     }
@@ -329,7 +344,9 @@ pub fn tg_disconnect_bot(app: AppHandle, state: Shared<'_>) -> Res<TelegramStatu
         s.telegram.chat_id = None;
         s.telegram.bot_username = None;
         s.telegram.accept_submissions = false;
+        s.telegram.group_shield = false;
     }
+    state.jobs.groups_clear();
     state.store.save_settings();
     for k in ["tg_verified_at", "tg_last_test_at", "tg_last_test_ok", "tg_last_test_error", "tg_offset"] {
         state.jobs.kv_delete(k);
@@ -381,4 +398,47 @@ pub fn tg_set_desktop_folder(app: AppHandle, state: Shared<'_>, path: Option<Str
     state.store.save_settings();
     apply(&app, state.inner());
     Ok(telegram_status(&state))
+}
+
+/// The owner's master switch for Group Shield. Turning it on does not protect any group by itself: each group's own
+/// administrators still have to send /setup on in that group.
+#[tauri::command]
+pub fn tg_set_group_shield(app: AppHandle, state: Shared<'_>, enabled: bool) -> Res<TelegramStatus> {
+    require_allowed(&state)?;
+    if !state.store.settings.lock().unwrap().telegram.groups_allowed {
+        return Err("Your organization does not allow Telegram group protection on this device.".into());
+    }
+    if enabled && !state.tg_vault.exists() {
+        return Err("Connect a bot first.".into());
+    }
+    {
+        let mut s = state.store.settings.lock().unwrap();
+        s.telegram.group_shield = enabled;
+    }
+    state.store.save_settings();
+    state.jobs.add_event("group_shield", "info", if enabled { "Group Shield was turned on." } else { "Group Shield was turned off." }, now_ms());
+    apply(&app, state.inner());
+    Ok(telegram_status(&state))
+}
+
+/// Stop protecting one group (also turns its automatic deletion off).
+#[tauri::command]
+pub fn tg_group_disable(app: AppHandle, state: Shared<'_>, id: i64) -> Res<TelegramStatus> {
+    state.service.group_disable(id);
+    apply(&app, state.inner());
+    Ok(telegram_status(&state))
+}
+
+/// Ask the bot to leave a group and forget everything stored about it.
+#[tauri::command]
+pub async fn tg_group_leave(app: AppHandle, state: Shared<'_>, id: i64) -> Res<TelegramStatus> {
+    let st = state.inner().clone();
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        st.service.group_leave(id)?;
+        apply(&app2, &st);
+        Ok(telegram_status(&st))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

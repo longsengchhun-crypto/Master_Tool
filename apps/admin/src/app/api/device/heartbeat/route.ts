@@ -16,8 +16,8 @@ export const POST = handle(
     const b = await body(req, HeartbeatRequest);
 
     await q(
-      `UPDATE devices SET app_version = $2, engine_version = $3, intel_version = $4, intel_updated_at = $5, protection = $6, queue = $7, telegram = $8, last_seen_at = now() WHERE id = $1`,
-      [dev.id, b.appVersion, b.engineVersion, b.intelVersion, b.intelUpdatedAt, JSON.stringify(b.protection), JSON.stringify(b.queue ?? {}), JSON.stringify(b.telegram ?? {})],
+      `UPDATE devices SET app_version = $2, engine_version = $3, intel_version = $4, intel_updated_at = $5, protection = $6, queue = $7, telegram = $8, tg_groups = $9, last_seen_at = now() WHERE id = $1`,
+      [dev.id, b.appVersion, b.engineVersion, b.intelVersion, b.intelUpdatedAt, JSON.stringify(b.protection), JSON.stringify(b.queue ?? {}), JSON.stringify(b.telegram ?? {}), JSON.stringify(b.groups ?? {})],
     );
     if (b.engineVersion && b.intelVersion) {
       await q('INSERT INTO intel_versions(engine, version) VALUES ($1,$2) ON CONFLICT (engine, version) DO NOTHING', [b.engineVersion.slice(0, 40), b.intelVersion.slice(0, 80)]);

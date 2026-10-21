@@ -61,9 +61,14 @@ pub fn apply_policy(app: &AppHandle, st: &Arc<AppState>, policy: &Value) {
     // An organization may switch the Telegram integrations off. Disabling the bot also removes the stored token,
     // so nothing keeps the integration alive behind the user's back. The user sees why on the Telegram page.
     let (bot_ok, acct_ok) = (policy["telegramBotAllowed"].as_bool().unwrap_or(true), policy["telegramAccountAllowed"].as_bool().unwrap_or(true));
+    let groups_ok = policy["telegramGroupsAllowed"].as_bool().unwrap_or(true);
     {
         let mut s = st.store.settings.lock().unwrap();
         s.telegram.account_allowed = acct_ok;
+        if s.telegram.groups_allowed != groups_ok {
+            s.telegram.groups_allowed = groups_ok;
+            changed = true;
+        }
         if s.telegram.bot_allowed != bot_ok {
             s.telegram.bot_allowed = bot_ok;
             changed = true;
@@ -76,7 +81,9 @@ pub fn apply_policy(app: &AppHandle, st: &Arc<AppState>, policy: &Value) {
             s.telegram.chat_id = None;
             s.telegram.bot_username = None;
             s.telegram.accept_submissions = false;
+            s.telegram.group_shield = false;
         }
+        st.jobs.groups_clear();
         st.jobs.clear_outbox();
         st.jobs.add_event("telegram_policy", "warning", "Your organization turned off Telegram notifications; the bot was disconnected and its token removed.", sentrix_core::queue::now_ms());
         changed = true;
@@ -95,9 +102,15 @@ fn heartbeat_payload(app: &AppHandle, st: &AppState) -> Value {
     let now = sentrix_core::queue::now_ms();
     let q = st.jobs.stats(now).unwrap_or_default();
     let ob = st.jobs.outbox_stats(now).unwrap_or_default();
+    let gt = st.jobs.group_totals(now - 86_400_000).unwrap_or_default();
     json!({
         // Operational counts only. No file names, hashes, chat ids, tokens or message text are ever included here.
         "queue": { "queued": q.queued, "failed": q.failed, "stuck": q.stuck },
+        // Counts only: never group names, chat ids, member names or file names.
+        "groups": {
+            "registered": gt.registered, "protected": gt.protected, "autoDelete": gt.auto_delete,
+            "scans24h": gt.scans, "threats24h": gt.threats, "errors24h": gt.errors,
+        },
         "telegram": {
             "botConnected": st.tg_vault.exists() && st.store.settings.lock().unwrap().telegram.chat_id.is_some(),
             "deliveryFailures24h": ob.failed_24h,

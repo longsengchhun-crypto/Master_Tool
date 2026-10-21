@@ -139,11 +139,44 @@ pub struct BotInfo {
     pub username: Option<String>,
     #[serde(default)]
     pub first_name: Option<String>,
+    /// False while BotFather "privacy mode" is on: in groups the bot then only receives commands, mentions and replies,
+    /// NOT ordinary messages or files (unless it is a group administrator).
+    #[serde(default)]
+    pub can_read_all_group_messages: Option<bool>,
+    #[serde(default)]
+    pub can_join_groups: Option<bool>,
+}
+
+/// A user's standing in a chat, as reported by Telegram (never inferred from message text).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Member {
+    /// creator, administrator, member, restricted, left, kicked
+    pub status: String,
+    pub can_delete_messages: bool,
+}
+
+impl Member {
+    pub fn is_admin(&self) -> bool {
+        self.status == "creator" || self.status == "administrator"
+    }
+    /// The chat creator can always delete; an administrator needs the explicit right.
+    pub fn may_delete(&self) -> bool {
+        self.status == "creator" || (self.status == "administrator" && self.can_delete_messages)
+    }
+}
+
+/// The bot's own membership changed in a chat (added to or removed from a group, promoted, demoted).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemberChange {
+    pub new_status: String,
+    pub old_status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Document {
     pub file_id: String,
+    /// Stable across chats and forwards; used to recognise the same file twice.
+    pub file_unique_id: Option<String>,
     pub file_name: Option<String>,
     pub file_size: Option<u64>,
 }
@@ -153,7 +186,12 @@ pub struct Incoming {
     pub update_id: i64,
     pub chat_id: i64,
     pub chat_type: String,
+    pub chat_title: Option<String>,
+    pub message_id: Option<i64>,
     pub from_id: Option<i64>,
+    /// Set when an administrator posts anonymously (the "sender" is the group itself). The person cannot be identified.
+    pub anonymous_admin: bool,
+    pub member_change: Option<MemberChange>,
     pub text: Option<String>,
     pub document: Option<Document>,
     /// A photo/video/audio/etc. was sent instead of a document (Telegram recompresses photos, so they are not scanned).
@@ -210,14 +248,38 @@ impl BotClient {
 
     /// Send HTML text. `text` must already be escaped (see `esc`). Returns the message id.
     pub fn send_message(&self, chat_id: i64, text: &str) -> Result<i64, TgError> {
+        self.send_reply(chat_id, text, None)
+    }
+
+    /// Like `send_message`, optionally as a reply (so a group result sits under the file it describes).
+    pub fn send_reply(&self, chat_id: i64, text: &str, reply_to: Option<i64>) -> Result<i64, TgError> {
         let text: String = text.chars().take(MAX_MESSAGE_CHARS).collect();
-        let r = self.call("sendMessage", &json!({ "chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": true }), None)?;
+        let mut body = json!({ "chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": true });
+        if let Some(m) = reply_to {
+            body["reply_parameters"] = json!({ "message_id": m, "allow_sending_without_reply": true });
+        }
+        let r = self.call("sendMessage", &body, None)?;
         Ok(r["message_id"].as_i64().unwrap_or(0))
+    }
+
+    /// Ask Telegram for a user's standing in a chat. This is the only source of truth for "is this person an admin".
+    pub fn get_chat_member(&self, chat_id: i64, user_id: i64) -> Result<Member, TgError> {
+        let r = self.call("getChatMember", &json!({ "chat_id": chat_id, "user_id": user_id }), None)?;
+        Ok(Member { status: r["status"].as_str().unwrap_or("").to_string(), can_delete_messages: r["can_delete_messages"].as_bool().unwrap_or(false) })
+    }
+
+    /// Delete a message. Telegram only allows it when the bot is an administrator with the delete right.
+    pub fn delete_message(&self, chat_id: i64, message_id: i64) -> Result<(), TgError> {
+        self.call("deleteMessage", &json!({ "chat_id": chat_id, "message_id": message_id }), None).map(|_| ())
+    }
+
+    pub fn leave_chat(&self, chat_id: i64) -> Result<(), TgError> {
+        self.call("leaveChat", &json!({ "chat_id": chat_id }), None).map(|_| ())
     }
 
     /// Long-poll for updates. Pass `offset = last_update_id + 1` to acknowledge earlier ones.
     pub fn get_updates(&self, offset: Option<i64>, timeout_s: u64, limit: u32) -> Result<Vec<Incoming>, TgError> {
-        let mut body = json!({ "timeout": timeout_s, "limit": limit, "allowed_updates": ["message"] });
+        let mut body = json!({ "timeout": timeout_s, "limit": limit, "allowed_updates": ["message", "my_chat_member"] });
         if let Some(o) = offset {
             body["offset"] = json!(o);
         }
@@ -259,13 +321,38 @@ impl BotClient {
 }
 
 fn parse_update(u: &Value) -> Option<Incoming> {
+    let update_id = u["update_id"].as_i64()?;
+    if let Some(c) = u.get("my_chat_member") {
+        return Some(Incoming {
+            update_id,
+            chat_id: c["chat"]["id"].as_i64()?,
+            chat_type: c["chat"]["type"].as_str().unwrap_or("").to_string(),
+            chat_title: c["chat"]["title"].as_str().map(String::from),
+            message_id: None,
+            from_id: c["from"]["id"].as_i64(),
+            anonymous_admin: false,
+            member_change: Some(MemberChange { new_status: c["new_chat_member"]["status"].as_str().unwrap_or("").to_string(), old_status: c["old_chat_member"]["status"].as_str().unwrap_or("").to_string() }),
+            text: None,
+            document: None,
+            other_media: false,
+        });
+    }
     let m = u.get("message")?;
-    let doc = m.get("document").map(|d| Document { file_id: d["file_id"].as_str().unwrap_or_default().to_string(), file_name: d["file_name"].as_str().map(String::from), file_size: d["file_size"].as_u64() }).filter(|d| !d.file_id.is_empty());
+    let doc = m
+        .get("document")
+        .map(|d| Document { file_id: d["file_id"].as_str().unwrap_or_default().to_string(), file_unique_id: d["file_unique_id"].as_str().map(String::from), file_name: d["file_name"].as_str().map(String::from), file_size: d["file_size"].as_u64() })
+        .filter(|d| !d.file_id.is_empty());
+    let chat_id = m["chat"]["id"].as_i64()?;
     Some(Incoming {
-        update_id: u["update_id"].as_i64()?,
-        chat_id: m["chat"]["id"].as_i64()?,
+        update_id,
+        chat_id,
         chat_type: m["chat"]["type"].as_str().unwrap_or("").to_string(),
+        chat_title: m["chat"]["title"].as_str().map(String::from),
+        message_id: m["message_id"].as_i64(),
         from_id: m["from"]["id"].as_i64(),
+        anonymous_admin: m["sender_chat"]["id"].as_i64() == Some(chat_id),
+        member_change: None,
+        // A file's caption is its text; commands only ever come from `text`.
         text: m["text"].as_str().map(String::from),
         other_media: doc.is_none() && ["photo", "video", "audio", "voice", "video_note", "animation", "sticker"].iter().any(|k| m.get(*k).is_some()),
         document: doc,

@@ -7,6 +7,7 @@ the app labels them separately. Read the **coverage** column before relying on a
 |---|---|---|---|
 | **Personal bot reports** | Sends scan results to a bot **you** created, in a chat only you can read | A bot token from @BotFather | Implemented. Tested against a local Bot API **test double**; **not** tested against live Telegram (no token was available) |
 | **Files sent to your bot** | You send a file to your bot; SENTRIX scans it locally and replies | The bot above | Implemented. Same test status |
+| **Group Shield** | Scans files posted in groups the bot was added to and posts results there; optional consented deletion of malicious messages | The bot, the owner's master switch, a group administrator's `/setup on` | Implemented; tested against the test double and real ClamAV. See [GROUP_SHIELD.md](GROUP_SHIELD.md) |
 | **Telegram Desktop folder** | Files Telegram Desktop saved to disk are scanned like any download and labelled "Telegram Desktop" | Telegram Desktop installed | Implemented; tested with real ClamAV in a folder that stands in for Telegram's download folder |
 | **Account monitoring** | Scan attachments in your chats, groups and channels from your account | Official MTProto client, your own `api_id`, a login | **NOT IMPLEMENTED.** See below |
 

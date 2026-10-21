@@ -4,6 +4,7 @@ pub mod account;
 pub mod archive;
 pub mod clamav;
 pub mod eicar;
+pub mod group;
 pub mod guard;
 pub mod hash;
 pub mod heuristics;

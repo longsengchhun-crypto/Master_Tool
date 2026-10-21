@@ -27,6 +27,8 @@ export const DevicePolicy = z.strictObject({
   // Organization switches for the Telegram integrations. Turning the bot off also removes its token from the device.
   telegramBotAllowed: z.boolean().default(true),
   telegramAccountAllowed: z.boolean().default(true),
+  // Group Shield (the owner's bot scanning files in Telegram groups). Off here also forces the owner's switch off.
+  telegramGroupsAllowed: z.boolean().default(true),
 });
 export type DevicePolicy = z.infer<typeof DevicePolicy>;
 
@@ -53,6 +55,16 @@ export const HeartbeatRequest = z.strictObject({
   // the schema is strict, so any such field is rejected.
   queue: z
     .strictObject({ queued: z.number().int().min(0), failed: z.number().int().min(0), stuck: z.number().int().min(0) })
+    .optional(),
+  groups: z
+    .strictObject({
+      registered: z.number().int().min(0),
+      protected: z.number().int().min(0),
+      autoDelete: z.number().int().min(0),
+      scans24h: z.number().int().min(0),
+      threats24h: z.number().int().min(0),
+      errors24h: z.number().int().min(0),
+    })
     .optional(),
   telegram: z
     .strictObject({

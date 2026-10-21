@@ -44,6 +44,8 @@ pub struct ServiceConfig {
     pub notify: NotifyPrefs,
     pub chat_id: Option<i64>,
     pub accept_submissions: bool,
+    /// Group Shield master switch: the owner has agreed that groups the bot is in may be scanned on this computer.
+    pub group_shield: bool,
     pub workers: usize,
     /// Reconciliation only looks at files modified within this many days (a whole old Downloads folder is not rescanned).
     pub reconcile_lookback_days: i64,
@@ -52,7 +54,7 @@ pub struct ServiceConfig {
 
 impl ServiceConfig {
     pub fn new(tmp_root: PathBuf) -> Self {
-        ServiceConfig { realtime: false, roots: vec![], exclude: vec![], auto_quarantine: false, execution_guard: true, notify: NotifyPrefs::default(), chat_id: None, accept_submissions: false, workers: 2, reconcile_lookback_days: 7, tmp_root }
+        ServiceConfig { realtime: false, roots: vec![], exclude: vec![], auto_quarantine: false, execution_guard: true, notify: NotifyPrefs::default(), chat_id: None, accept_submissions: false, group_shield: false, workers: 2, reconcile_lookback_days: 7, tmp_root }
     }
 }
 
@@ -87,21 +89,31 @@ pub struct ProtectionHealth {
     pub last_file_event_at: Option<i64>,
 }
 
-struct Inner {
-    scanner: Arc<Scanner>,
-    quarantine: Arc<Quarantine>,
-    store: Arc<JobStore>,
-    hooks: Arc<dyn Hooks>,
-    cfg: RwLock<ServiceConfig>,
-    bot: RwLock<Option<Arc<BotClient>>>,
-    monitor: Mutex<Option<Monitor>>,
-    stop: Arc<AtomicBool>,
-    last_engine_state: Mutex<String>,
-    rejected: AtomicU64,
-    last_reconcile: AtomicI64,
-    last_event: AtomicI64,
-    submission_times: Mutex<VecDeque<Instant>>,
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupView {
+    pub id: i64,
+    #[serde(flatten)]
+    pub group: Group,
+    pub stats: GroupStats,
 }
+
+pub(crate) struct Inner {
+    pub(crate) scanner: Arc<Scanner>,
+    pub(crate) quarantine: Arc<Quarantine>,
+    pub(crate) store: Arc<JobStore>,
+    pub(crate) hooks: Arc<dyn Hooks>,
+    pub(crate) cfg: RwLock<ServiceConfig>,
+    pub(crate) bot: RwLock<Option<Arc<BotClient>>>,
+    pub(crate) monitor: Mutex<Option<Monitor>>,
+    pub(crate) stop: Arc<AtomicBool>,
+    pub(crate) last_engine_state: Mutex<String>,
+    pub(crate) rejected: AtomicU64,
+    pub(crate) last_reconcile: AtomicI64,
+    pub(crate) last_event: AtomicI64,
+    pub(crate) submission_times: Mutex<VecDeque<Instant>>,
+
+    pub(crate) groups: crate::group::GroupState,}
 
 pub struct ProtectionService {
     inner: Arc<Inner>,
@@ -114,7 +126,7 @@ fn mtime_ms(m: &std::fs::Metadata) -> i64 {
 
 impl Inner {
     /// Sleep in small steps so shutdown is prompt. Returns false when the service is stopping.
-    fn nap(&self, ms: u64) -> bool {
+    pub(crate) fn nap(&self, ms: u64) -> bool {
         let mut left = ms;
         while left > 0 {
             if self.stop.load(Ordering::Relaxed) {
@@ -144,7 +156,7 @@ impl Inner {
         }
     }
 
-    fn event(&self, kind: &str, severity: &str, msg: &str) {
+    pub(crate) fn event(&self, kind: &str, severity: &str, msg: &str) {
         self.store.add_event(kind, severity, msg, now_ms());
         self.hooks.on_health_changed();
     }
@@ -360,7 +372,7 @@ impl Inner {
 
     // ---- ephemeral scans (bot submissions, account attachments) --------------------------------------------
 
-    fn scan_ephemeral(&self, origin: &str, display_name: &str, reader: &mut dyn Read, max_bytes: u64) -> Result<ScanReport, String> {
+    pub(crate) fn scan_ephemeral(&self, origin: &str, display_name: &str, reader: &mut dyn Read, max_bytes: u64) -> Result<ScanReport, String> {
         let cfg = self.cfg.read().unwrap().clone();
         let dir = cfg.tmp_root.join(uuid::Uuid::new_v4().to_string());
         std::fs::create_dir_all(&dir).map_err(|e| format!("could not create a temporary folder: {e}"))?;
@@ -390,7 +402,7 @@ impl Inner {
         Ok(r)
     }
 
-    fn handle_submission(&self, bot: &BotClient, chat_id: i64, u: &Incoming) {
+    pub(crate) fn handle_submission(&self, bot: &BotClient, chat_id: i64, u: &Incoming) {
         let reply = |key: String, text: String| {
             let _ = self.store.enqueue_notification(&key, "submission", &text, now_ms());
         };
@@ -480,9 +492,52 @@ impl ProtectionService {
                 last_reconcile: AtomicI64::new(0),
                 last_event: AtomicI64::new(0),
                 submission_times: Mutex::new(VecDeque::new()),
+                groups: Default::default(),
             }),
             threads: Mutex::new(vec![]),
         }
+    }
+
+
+    /// Registered groups with their last-24-hour numbers, for the app's Telegram page. No file names are kept.
+    pub fn groups_view(&self) -> Vec<GroupView> {
+        let i = &self.inner;
+        let since = now_ms() - 86_400_000;
+        i.store
+            .groups_list()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|g| g.left_at.is_none())
+            .map(|g| {
+                let stats = i.store.group_stats(g.chat_id, since).unwrap_or_default();
+                GroupView { id: g.chat_id, group: g, stats }
+            })
+            .collect()
+    }
+
+    /// The owner stops protecting one group (and can no longer be consented away by it): turns protection and deletion off.
+    pub fn group_disable(&self, chat_id: i64) {
+        let _ = self.inner.store.group_set_enabled(chat_id, false, 0, now_ms());
+        let _ = self.inner.store.group_set_auto_delete(chat_id, false, 0, now_ms());
+    }
+
+    /// Forget a group's local history and ask the bot to leave it.
+    pub fn group_leave(&self, chat_id: i64) -> Result<(), String> {
+        let bot = self.inner.bot.read().unwrap().clone();
+        if let Some(b) = bot {
+            b.leave_chat(chat_id).map_err(|e| e.user_message())?;
+        }
+        let _ = self.inner.store.group_forget(chat_id);
+        Ok(())
+    }
+
+    pub fn group_totals(&self) -> GroupTotals {
+        self.inner.store.group_totals(now_ms() - 86_400_000).unwrap_or_default()
+    }
+
+    /// Does Telegram privacy mode hide ordinary group messages from the bot? None when not yet known.
+    pub fn privacy_mode_blocks(&self) -> Option<bool> {
+        self.inner.store.kv_get("tg_privacy_blocking").map(|v| v == "1")
     }
 
     pub fn store(&self) -> &Arc<JobStore> {
@@ -544,6 +599,7 @@ impl ProtectionService {
             loop {
                 me.reconcile();
                 me.store.prune_outbox(now_ms());
+                me.store.prune_group_scans(now_ms());
                 if !me.nap(10 * 60 * 1000) {
                     return;
                 }
@@ -574,17 +630,25 @@ impl ProtectionService {
         th.push(spawn("sentrix-tgbot", Box::new(move || {
             let mut backoff = 5u64;
             while me.nap(1000) {
-                let (bot, chat, on) = {
+                let (bot, chat, on, shield) = {
                     let c = me.cfg.read().unwrap();
-                    (me.bot.read().unwrap().clone(), c.chat_id, c.accept_submissions)
+                    (me.bot.read().unwrap().clone(), c.chat_id, c.accept_submissions, c.group_shield)
                 };
-                let (Some(bot), Some(chat), true) = (bot, chat, on) else { continue };
+                // One worker serves both features; it only runs while at least one of them is switched on.
+                let (Some(bot), Some(chat), true) = (bot, chat, on || shield) else { continue };
                 let offset = me.store.kv_get("tg_offset").and_then(|s| s.parse::<i64>().ok());
                 match bot.get_updates(offset, 10, 20) {
                     Ok(updates) => {
                         backoff = 5;
                         for u in updates {
-                            me.handle_submission(&bot, chat, &u);
+                            if matches!(u.chat_type.as_str(), "group" | "supergroup") {
+                                if let Some(info) = me.bot_info(&bot) {
+                                    me.handle_group_update(&bot, &info, &u);
+                                }
+                            } else if on && u.member_change.is_none() {
+                                me.handle_submission(&bot, chat, &u);
+                            }
+                            // Only after the update was fully handled, so a crash replays it instead of losing it.
                             me.store.kv_set("tg_offset", &(u.update_id + 1).to_string());
                         }
                     }
