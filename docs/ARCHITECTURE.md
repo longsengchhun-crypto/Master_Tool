@@ -120,9 +120,12 @@ File contents are never transmitted; file names only if both the user's reportin
 
 One design language across the desktop app, console and site (`index.css` / `globals.css` hold the tokens):
 
-* Windows-native: Segoe UI Variable, Fluent-style neutrals, one flat accent (`#0f6cbd` light, `#479ef5` dark), status colours
-  only for status. Both themes are authored separately; every text-on-background token pair in use was computed at 4.5:1 or better (WCAG AA for body text).
-* Flat surfaces with hairline borders, 4 px controls and 8 px panels; no gradients, glow, blur or entrance animations.
-* Information is shown as label/value rows and tables (`Section`, `Rows`, `Row` in each `ui.tsx`), not grids of stat cards.
-* Status colour never appears without text: a state is always written out.
-* Brand: the SENTRIX shield-S mark (`apps/desktop/brand/*.svg`, unchanged by the redesign; `npm run icons -w @sentrix/desktop` regenerates the PNG/ICO/ICNS).
+* Built for people who are not developers: seven destinations (Home, Scan, History, Quarantine, Protection, Telegram, Settings),
+  one status on Home, a short "Needs attention" list of things the user can act on, and technical detail behind
+  "Details"/"Technical details" disclosures that are closed by default.
+* The accent is the logo's teal-to-blue. The navigation rail is always dark navy (the logo's own background); the working
+  area follows the theme. Segoe UI Variable, flat surfaces with soft elevation, 8-12 px radii, status colour only for status.
+* A pending confirmed-malicious file overrides a "protected" headline everywhere (Home, sidebar); the interface never shows a
+  reassuring state while something dangerous is waiting.
+* Both themes are authored separately; every text-on-background token pair in use was computed at 4.5:1 or better.
+* Brand: the SENTRIX shield-S mark (`apps/desktop/brand/*.svg`, unchanged; `npm run icons -w @sentrix/desktop` regenerates PNG/ICO/ICNS).

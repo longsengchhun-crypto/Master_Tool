@@ -50,7 +50,7 @@ export function Quarantine() {
     <div>
       <PageHeader
         title="Quarantine"
-        subtitle="Quarantined files are encrypted and cannot run or be opened. You can restore a file if you are sure it is safe, or delete it permanently."
+        subtitle="Locked away and unable to run. Restore a file only if you are sure it is safe."
         actions={
           <Button
             onClick={async () => {
@@ -58,7 +58,7 @@ export function Quarantine() {
               setAudit(bad == null ? 'ok' : 'broken');
             }}
           >
-            <ShieldCheck className="size-4" /> Verify audit log
+            <ShieldCheck className="size-4" /> Check integrity
           </Button>
         }
       />
@@ -78,16 +78,16 @@ export function Quarantine() {
         {rows === null ? (
           <div className="p-8 text-sm text-muted">Loading…</div>
         ) : rows.length === 0 ? (
-          <Empty icon={<ShieldCheck className="size-6" />} title="Quarantine is empty">Files you quarantine appear here. Nothing is moved automatically unless you turn that on under Protection.</Empty>
+          <Empty icon={<ShieldCheck className="size-6" />} title="Quarantine is empty">Files you quarantine appear here. They are locked and cannot run.</Empty>
         ) : (
           <table className="w-full text-left text-sm">
             <thead className="border-b border-line text-xs font-semibold text-muted">
               <tr>
-                <th className="px-5 py-3 font-medium">File</th>
-                <th className="px-3 py-3 font-medium">Verdict</th>
-                <th className="px-3 py-3 font-medium">Quarantined</th>
-                <th className="px-3 py-3 text-right font-medium">Size</th>
-                <th className="px-5 py-3 text-right font-medium">Actions</th>
+                <th className="px-5 py-3 font-semibold">File</th>
+                <th className="px-3 py-3 font-semibold">Verdict</th>
+                <th className="px-3 py-3 font-semibold">Quarantined</th>
+                <th className="px-3 py-3 text-right font-semibold">Size</th>
+                <th className="px-5 py-3 text-right font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
@@ -97,9 +97,6 @@ export function Quarantine() {
                     <div className="truncate font-medium text-ink">{r.original_name}</div>
                     <div className="truncate text-xs text-muted" title={r.original_path}>
                       {splitPath(r.original_path)[0]}
-                    </div>
-                    <div className="truncate font-mono text-[11px] text-faint" title={r.sha256}>
-                      {r.sha256.slice(0, 20)}…
                     </div>
                   </td>
                   <td className="px-3 py-3">

@@ -31,8 +31,8 @@ SENTRIX does not claim to see every Telegram message or attachment. It cannot.
 
 1. In Telegram open **@BotFather**, send `/newbot`, follow the prompts, copy the token.
 2. Open your bot and press **Start** (a bot cannot message you until you do).
-3. SENTRIX → **Telegram Protection** → paste the token → **Find my chat** (asks Telegram which chats messaged the bot) →
-   **Connect and send test**.
+3. SENTRIX → **Telegram** → paste the token → **Connect**. SENTRIX asks Telegram which chat messaged the bot (asking you to
+   choose if there are several, or to type a chat ID if none is found), sends a test message, and only then saves anything.
 
 SENTRIX saves nothing until Telegram has confirmed the token (`getMe`) **and** accepted a test message to that chat. The
 status "Connected" is only ever shown after that; later it shows the result of the last real test or delivery, including
@@ -79,7 +79,7 @@ temporary directory, size-checked against both Telegram's declared size and the 
 
 | Symptom | Cause / action |
 |---|---|
-| "The token works, but no one has messaged this bot yet" | Open the bot in Telegram and press Start, then **Find my chat** again |
+| "Open your bot in Telegram, press Start, then try again" | The bot has no chat yet: open it in Telegram, press Start, then press Connect again |
 | Test fails with an unauthorized error | Token revoked or mistyped; get a new one from @BotFather (`/token`) |
 | Test fails with a network error | Telegram is blocked or unreachable from this network; reports stay queued |
 | Nothing arrives after sending a file to the bot | Submissions toggle off, wrong chat, SENTRIX not running, or file over 20 MB |
@@ -87,7 +87,7 @@ temporary directory, size-checked against both Telegram's declared size and the 
 
 ## Removing your credentials
 
-**Telegram Protection → Disconnect and remove token** wipes the token file, clears the chat id, bot name and queued
+**Telegram → Disconnect** wipes the token file, clears the chat id, bot name and queued
 messages, and stops delivery and submissions. To make the old token useless everywhere, also send `/revoke` to
 @BotFather. Deleting the SENTRIX data folder removes everything else it stored.
 

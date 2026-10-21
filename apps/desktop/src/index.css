@@ -3,60 +3,72 @@
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
 /*
- * Design language: a native-feeling Windows utility. Flat surfaces, hairline borders, small radii, one accent.
- * Neutrals and status colours follow Fluent 2's palette; both themes are authored, not inverted.
- * Text tokens meet WCAG AA on the surfaces they are used on.
+ * The accent comes from the logo's teal-to-blue. The navigation rail is always dark navy (the logo's own background);
+ * the working area follows the theme. Flat surfaces, soft elevation, status colour only for status.
+ * Every text-on-background pair in use is at least 4.5:1 in both themes (computed, see docs/ARCHITECTURE.md).
  */
 :root {
   color-scheme: light;
-  --bg: #f5f5f5;
-  --bg-elev: #fafafa;
+  --bg: #f5f7fa;
+  --bg-elev: #ffffff;
   --surface: #ffffff;
   --surface-solid: #ffffff;
-  --surface-2: #f0f0f0;
-  --line: #e0e0e0;
-  --line-strong: #c7c7c7;
-  --text: #242424;
-  --muted: #5c5c5c;
-  --faint: #707070;
-  --accent: #0f6cbd;
-  --accent-hover: #115ea3;
+  --surface-2: #eef2f6;
+  --line: #e1e7ee;
+  --line-strong: #c5cfdb;
+  --text: #14202e;
+  --muted: #55627a;
+  --faint: #5f6b7e;
+  --accent: #0b7285;
+  --accent-hover: #095b6b;
   --accent-ink: #ffffff;
-  --ok: #107c10;
-  --warn: #9d5d00;
-  --danger: #b10e1c;
-  --info: #0f6cbd;
-  --ok-bg: #e7f3e7;
-  --warn-bg: #fdf0d8;
-  --danger-bg: #fbe6e8;
-  --info-bg: #e5f0fa;
-  --select: #ebf3fc;
+  --ok: #0f7b4a;
+  --warn: #9a5b00;
+  --danger: #b42318;
+  --info: #1d5fd1;
+  --ok-bg: #e5f4ec;
+  --warn-bg: #fcefd6;
+  --danger-bg: #fce8e6;
+  --info-bg: #e6eefc;
+  --select: #e6f3f6;
+  --shadow: 0 1px 2px rgba(20, 32, 46, 0.05), 0 4px 14px -6px rgba(20, 32, 46, 0.10);
 }
 
 [data-theme='dark'] {
   color-scheme: dark;
-  --bg: #1b1b1b;
-  --bg-elev: #202020;
-  --surface: #292929;
-  --surface-solid: #292929;
-  --surface-2: #333333;
-  --line: #3d3d3d;
-  --line-strong: #5c5c5c;
-  --text: #ffffff;
-  --muted: #c2c2c2;
-  --faint: #a0a0a0;
-  --accent: #479ef5;
-  --accent-hover: #62abf5;
-  --accent-ink: #0b1b2b;
-  --ok: #54b054;
+  --bg: #0d1420;
+  --bg-elev: #111a28;
+  --surface: #151e2d;
+  --surface-solid: #151e2d;
+  --surface-2: #1c2738;
+  --line: #263247;
+  --line-strong: #3a4860;
+  --text: #eef3f9;
+  --muted: #aab6c8;
+  --faint: #8793a8;
+  --accent: #3cc4d9;
+  --accent-hover: #62d3e4;
+  --accent-ink: #06222b;
+  --ok: #4cc38a;
   --warn: #f0b24a;
-  --danger: #e8727d;
-  --info: #479ef5;
-  --ok-bg: #1f3a1f;
-  --warn-bg: #3d2f12;
-  --danger-bg: #432026;
-  --info-bg: #14304a;
-  --select: #1c2f42;
+  --danger: #f2857c;
+  --info: #7aa8f5;
+  --ok-bg: #12301f;
+  --warn-bg: #3a2c10;
+  --danger-bg: #3f1d1b;
+  --info-bg: #172846;
+  --select: #12303a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px -8px rgba(0, 0, 0, 0.6);
+}
+
+:root {
+  --side: #0b1424;
+  --side-text: #b5c2d6;
+  --side-strong: #ffffff;
+  --side-line: rgba(255, 255, 255, 0.09);
+  --side-hover: rgba(255, 255, 255, 0.06);
+  --side-active: rgba(255, 255, 255, 0.1);
+  --side-accent: #3cc4d9;
 }
 
 @theme inline {
@@ -84,6 +96,13 @@
   --color-warnbg: var(--warn-bg);
   --color-dangerbg: var(--danger-bg);
   --color-infobg: var(--info-bg);
+  --color-side: var(--side);
+  --color-sidetext: var(--side-text);
+  --color-sidestrong: var(--side-strong);
+  --color-sideline: var(--side-line);
+  --color-sidehover: var(--side-hover);
+  --color-sideactive: var(--side-active);
+  --color-sideaccent: var(--side-accent);
 }
 
 html,
@@ -98,7 +117,7 @@ body {
   color: var(--text);
   font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.45;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
@@ -106,11 +125,12 @@ body {
 .panel {
   background: var(--surface);
   border: 1px solid var(--line);
+  box-shadow: var(--shadow);
 }
 
 :focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 
 ::-webkit-scrollbar {
@@ -123,11 +143,39 @@ body {
   border-radius: 6px;
 }
 
+/* Page changes fade in; the live-protection dot breathes slowly. Both are off with reduced motion. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fade-in {
+  animation: fade-in 0.18s ease-out both;
+}
+@keyframes breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 40%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 0%, transparent);
+  }
+}
+.breathe {
+  animation: breathe 2.6s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
 }

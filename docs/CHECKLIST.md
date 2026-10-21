@@ -105,7 +105,7 @@ _Nothing below is claimed without a test or a check named next to it. Results of
 | "Connected" shown only after Telegram confirms | DONE (against a test double) | `getMe` + delivered test message required before anything is saved |
 | Report pipeline: queue, retry, 429, dedupe, recovery, bounded, delivery failure never alters verdicts | DONE (against a test double) | `queue`, `telegram`, `service` tests; found and fixed during final review: delivered text was retained forever (now erased) and a full queue dropped reports silently (now an event) |
 | Files sent to the bot: owner check, 20 MB limit, isolated temp, cleanup | DONE (against a test double) | Pipeline test incl. lying size and foreign sender |
-| Dashboard pages (Overview, Scan, Real-Time Protection, Telegram Protection, Quarantine, Scan History, Reports, Settings, Help and Privacy) | DONE | Only real data; viewed via dev mock. Quarantine/Scan/Reports/Settings pages unchanged apart from labels. **The installed app's new pages were not opened in the real GUI** |
+| Dashboard pages | DONE, simplified | Originally nine pages; reduced to seven for non-technical users (Home, Scan, History incl. reports, Quarantine, Protection, Telegram, Settings incl. privacy, organization and about). Only real data; viewed via the dev mock in both themes. **Not opened in the installed app** |
 | Console health metrics (counts only), tenant isolation, policy switches | DONE | Migration 003 applied; Phase 2 block in `tests/security.test.ts` |
 | Threat model / privacy docs | DONE | SECURITY_ARCHITECTURE T23-T32, TELEGRAM.md, in-app Help and Privacy |
 | Performance with real measurements | PARTIAL | Single runs, see [PERFORMANCE.md](PERFORMANCE.md); live Telegram latency and large-queue behaviour not measured |

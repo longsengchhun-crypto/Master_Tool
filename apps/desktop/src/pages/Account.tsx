@@ -5,7 +5,7 @@ import { api, errText } from '../lib/api';
 import { useApp } from '../lib/app';
 import { ago, when } from '../lib/format';
 import type { AccountStatus } from '../lib/types';
-import { Button, Card, Modal, Notice, PageHeader, Pill } from '../components/ui';
+import { Button, Card, Modal, Notice, Pill } from '../components/ui';
 
 const LICENSE_TEXT: Record<string, { tone: 'ok' | 'warn' | 'danger' | 'muted'; label: string; body: string }> = {
   valid: { tone: 'ok', label: 'Valid', body: 'Your license is active.' },
@@ -81,9 +81,7 @@ export function Account() {
   const lic = acct.license ? (LICENSE_TEXT[acct.license.state] ?? LICENSE_TEXT.none) : null;
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="Account and License" subtitle="SENTRIX works fully on its own. An account is only needed if your organization manages this device." />
-
+    <div className="space-y-4">
       {!acct.enrolled ? (
         <>
           <Card className="p-5">
@@ -91,7 +89,7 @@ export function Account() {
               
               <div>
                 <h2 className="text-sm font-semibold text-ink">This device is not managed</h2>
-                <p className="mt-1 text-sm text-muted">Nothing about this device is shared with anyone. If your IT administrator gave you an enrollment code, you can enroll below.</p>
+                <p className="mt-1 text-sm text-muted">Only needed if your IT administrator gave you an enrollment code. Nothing is shared until you enroll.</p>
               </div>
             </div>
             <div className="mt-6 grid gap-4 sm:grid-cols-2">

@@ -4,7 +4,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { api, errText } from './api';
 import type { AppStatus, BatchOut, Progress, ScanReport } from './types';
 
-export type Page = 'home' | 'scan' | 'protection' | 'telegram' | 'quarantine' | 'history' | 'reports' | 'settings' | 'help' | 'account';
+export type Page = 'home' | 'scan' | 'history' | 'quarantine' | 'protection' | 'telegram' | 'settings';
 
 export interface Toast {
   id: number;
@@ -40,6 +40,9 @@ interface Ctx {
   toasts: Toast[];
   dismissToast: (id: number) => void;
   realtimeFeed: ScanReport[];
+  /** Confirmed-malicious files that have not been quarantined (one per distinct content hash). */
+  danger: ScanReport[];
+  reloadDanger: () => Promise<void>;
 }
 
 const AppCtx = createContext<Ctx | null>(null);
@@ -56,6 +59,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [reportId, setReportId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [realtimeFeed, setFeed] = useState<ScanReport[]>([]);
+  const [danger, setDanger] = useState<ScanReport[]>([]);
   const [scan, setScan] = useState<ScanState>({ running: false, kind: null, progress: null, result: null, error: null });
   const [confirmFull, setConfirmFull] = useState(false);
   const toastId = useRef(0);
@@ -70,6 +74,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const reloadDanger = useCallback(async () => {
+    try {
+      const h = await api.history(500);
+      const seen = new Set<string>();
+      const out: ScanReport[] = [];
+      for (const r of h) {
+        if (r.verdict !== 'MALICIOUS' || r.quarantined) continue;
+        const k = r.file.sha256 || r.file.path;
+        if (!seen.has(k)) {
+          seen.add(k);
+          out.push(r);
+        }
+      }
+      setDanger(out);
+    } catch {
+      /* the badge simply stays as it was */
+    }
+  }, []);
+
   const toast = useCallback((tone: Toast['tone'], text: string) => {
     const id = ++toastId.current;
     setToasts((t) => [...t, { id, tone, text }]);
@@ -81,7 +104,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const go = useCallback((p: Page) => setPage(p), []);
   const openReport = useCallback((id: string) => {
     setReportId(id);
-    setPage('reports');
+    setPage('history');
   }, []);
 
   const runScan = useCallback(
@@ -151,6 +174,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(t);
   }, [refresh]);
 
+  // Dangerous-file list follows scan activity.
+  useEffect(() => {
+    void reloadDanger();
+  }, [reloadDanger, status?.stats.scansTotal, status?.stats.quarantined]);
+
   // Theme.
   useEffect(() => {
     const theme = status?.settings.theme ?? 'system';
@@ -165,8 +193,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [status?.settings.theme]);
 
   const value = useMemo<Ctx>(
-    () => ({ status, statusError, refresh, page, go, reportId, openReport, scan, startScan, startFullScan, requestFullScan, confirmFull, dismissFullScan, cancelScan, toast, toasts, dismissToast, realtimeFeed }),
-    [status, statusError, refresh, page, go, reportId, openReport, scan, startScan, startFullScan, requestFullScan, confirmFull, dismissFullScan, cancelScan, toast, toasts, dismissToast, realtimeFeed],
+    () => ({ danger, reloadDanger, status, statusError, refresh, page, go, reportId, openReport, scan, startScan, startFullScan, requestFullScan, confirmFull, dismissFullScan, cancelScan, toast, toasts, dismissToast, realtimeFeed }),
+    [danger, reloadDanger, status, statusError, refresh, page, go, reportId, openReport, scan, startScan, startFullScan, requestFullScan, confirmFull, dismissFullScan, cancelScan, toast, toasts, dismissToast, realtimeFeed],
   );
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }

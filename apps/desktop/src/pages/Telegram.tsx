@@ -1,23 +1,19 @@
 import { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Eye, EyeOff, FolderOpen, Send, Unplug } from 'lucide-react';
+import { CheckCircle2, Eye, EyeOff, FolderOpen, Send } from 'lucide-react';
 import { api, errText } from '../lib/api';
 import { useApp } from '../lib/app';
-import { agoMs, whenMs } from '../lib/format';
+import { agoMs } from '../lib/format';
 import { usePolled } from '../lib/hooks';
 import type { NotifyPrefs, TelegramStatus } from '../lib/types';
-import { Button, Card, Modal, Notice, PageHeader, Pill, Toggle } from '../components/ui';
+import { Button, Card, Disclosure, Modal, Notice, PageHeader, Pill, Toggle } from '../components/ui';
 
-const PREFS: [keyof NotifyPrefs, string, string][] = [
-  ['malicious', 'Malicious files', 'A malware engine identified a file as malicious.'],
-  ['suspicious', 'Suspicious files', 'Indicators were found that deserve a closer look.'],
-  ['quarantined', 'Files quarantined automatically', 'SENTRIX moved a file to quarantine.'],
-  ['unableToVerify', 'Files that could not be verified', 'Can be noisy if the engine is unavailable. Off by default.'],
-  ['cleanScans', 'Clean results', 'One message per clean file. Off by default; usually too frequent.'],
-  ['engineProblems', 'Engine problems', 'The detection engine stopped, or its signatures are out of date.'],
-  ['protectionStopped', 'Protection stopped', 'A watched folder stopped working or real-time protection was turned off.'],
-  ['accountEvents', 'Account and connection events', 'Bot connected or disconnected, delivery problems.'],
-  ['includeHash', 'Include the SHA-256 in reports', 'The hash identifies a file without revealing its contents. File names are always included.'],
+const MORE: [keyof NotifyPrefs, string][] = [
+  ['quarantined', 'When a file is quarantined automatically'],
+  ['unableToVerify', 'Files that could not be fully checked (can be frequent)'],
+  ['cleanScans', 'Every clean result (very frequent)'],
+  ['accountEvents', 'Bot connected or disconnected'],
+  ['includeHash', 'Include the file fingerprint (SHA-256) in reports'],
 ];
 
 export function Telegram() {
@@ -25,8 +21,8 @@ export function Telegram() {
   const st = usePolled(() => api.tgStatus(), 5000);
   const [token, setToken] = useState('');
   const [show, setShow] = useState(false);
-  const [chat, setChat] = useState('');
-  const [found, setFound] = useState<number[] | null>(null);
+  const [chats, setChats] = useState<number[] | null>(null);
+  const [manual, setManual] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmOff, setConfirmOff] = useState(false);
   const t = st.data;
@@ -48,24 +44,32 @@ export function Telegram() {
   };
 
   const set = (s: TelegramStatus) => st.setData(s);
-  const savePref = (k: keyof NotifyPrefs, v: boolean) => run('opts', () => api.tgSetOptions({ ...t.notify, [k]: v }, t.acceptSubmissions), set);
+  const savePrefs = (patch: Partial<NotifyPrefs>) => run('opts', () => api.tgSetOptions({ ...t.notify, ...patch }, t.acceptSubmissions), set);
 
-  const detect = () =>
-    run('detect', () => api.tgDetectChat(token), (ids) => {
-      setFound(ids);
-      if (ids.length === 1) setChat(String(ids[0]));
-      if (!ids.length) toast('warn', 'The token works, but no one has messaged this bot yet. Open your bot in Telegram, press Start, then try again.');
-    });
+  const done = (s: TelegramStatus) => {
+    set(s);
+    setToken('');
+    setChats(null);
+    setManual('');
+    toast('ok', 'Connected. Telegram accepted a test message.');
+  };
 
+  // One button: find the chat that messaged the bot, then connect. Only asks questions when it has to.
   const connect = () =>
-    run('connect', () => api.tgConnect(token, Number(chat)), (s) => {
-      set(s);
-      setToken('');
-      setShow(false);
-      setFound(null);
-      setChat('');
-      toast('ok', 'Telegram confirmed the token and delivered a test message. The bot is connected.');
-    });
+    run('connect', async () => {
+      const ids = manual ? [Number(manual)] : await api.tgDetectChat(token);
+      if (ids.length === 0) {
+        toast('warn', 'Open your bot in Telegram, press Start, then try again.');
+        return null;
+      }
+      if (ids.length > 1) {
+        setChats(ids);
+        return null;
+      }
+      return api.tgConnect(token, ids[0]);
+    }, (s) => s && done(s));
+
+  const connectTo = (id: number) => run('connect', () => api.tgConnect(token, id), done);
 
   const pickFolder = async () => {
     const sel = await open({ directory: true, title: 'Choose your Telegram Desktop download folder' });
@@ -73,200 +77,142 @@ export function Telegram() {
   };
 
   const bot = t.bot;
-  const tokenLooksRight = /^\d{5,}:[A-Za-z0-9_-]{30,}$/.test(token.trim());
+  const tokenOk = /^\d{5,}:[A-Za-z0-9_-]{30,}$/.test(token.trim());
   const d = t.desktop;
+  const candidate = d.detection.candidates.find((c) => c.exists);
+  const problems = t.notify.engineProblems && t.notify.protectionStopped;
+  const healthy = bot.connected && bot.lastTestOk !== false;
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="Telegram Protection" subtitle="Get scan results in your own Telegram bot, and scan files that arrive through Telegram Desktop. SENTRIX uses Telegram's official Bot API and never asks for your Telegram password or login codes." />
+    <div className="space-y-5">
+      <PageHeader title="Telegram" />
 
-      {!t.allowed && <Notice tone="info" title="Turned off by your organization">Your organization does not allow Telegram notifications on this device. Nothing on this page will connect.</Notice>}
+      {!t.allowed && <Notice tone="info">Your organization does not allow Telegram on this device.</Notice>}
 
-      <Card className="p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-sm font-semibold text-ink">Your personal bot</h2>
-            <p className="mt-1 text-sm text-muted">Reports are sent from a bot that <strong className="text-ink">you</strong> create with Telegram's @BotFather, to a chat that only you can read. SENTRIX does not operate any shared bot and has no access to yours.</p>
+      {!bot.configured ? (
+        <Card className="p-6">
+          <h2 className="text-base font-semibold text-ink">Get results in your own Telegram bot</h2>
+          <p className="mt-1 text-sm text-muted">Reports go to a private bot that only you control. SENTRIX never asks for your Telegram password or login code.</p>
+          <ol className="mt-4 space-y-1.5 text-sm text-muted">
+            <li><span className="font-semibold text-ink">1.</span> In Telegram, message <span className="font-semibold text-ink">@BotFather</span> and send <span className="font-mono">/newbot</span>. Copy the token it gives you.</li>
+            <li><span className="font-semibold text-ink">2.</span> Open your new bot and press <span className="font-semibold text-ink">Start</span>.</li>
+            <li><span className="font-semibold text-ink">3.</span> Paste the token here and press Connect.</li>
+          </ol>
+          <div className="mt-4 flex max-w-xl gap-2">
+            <input
+              type={show ? 'text' : 'password'}
+              value={token}
+              onChange={(e) => { setToken(e.target.value); setChats(null); }}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="Bot token, like 123456789:AA…"
+              aria-label="Bot token"
+              disabled={!t.allowed}
+              className="h-9 min-w-0 flex-1 rounded-lg border border-strong bg-solid px-3 font-mono text-sm text-ink"
+            />
+            <Button aria-label={show ? 'Hide token' : 'Show token'} onClick={() => setShow((v) => !v)}>{show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</Button>
+            <Button variant="primary" busy={busy === 'connect'} disabled={!tokenOk || !t.allowed} onClick={connect}>Connect</Button>
           </div>
-          <Pill tone={bot.connected ? (bot.lastTestOk === false ? 'warn' : 'ok') : 'muted'}>{bot.connected ? (bot.lastTestOk === false ? 'Problem' : 'Connected') : bot.configured ? 'Not verified' : 'Not connected'}</Pill>
-        </div>
-
-        {bot.configured ? (
-          <div className="mt-4 space-y-4">
-            <dl className="grid max-w-xl grid-cols-[12rem_1fr] gap-y-2 text-sm">
-              <dt className="text-muted">Bot</dt>
-              <dd className="text-ink">{bot.username ? `@${bot.username}` : 'Unknown'}</dd>
-              <dt className="text-muted">Chat</dt>
-              <dd className="font-mono text-ink">{bot.chatHint ?? '—'}</dd>
-              <dt className="text-muted">Token</dt>
-              <dd className="text-ink">Stored encrypted for this Windows user. Never shown.</dd>
-              <dt className="text-muted">Last connection test</dt>
-              <dd className="text-ink">{bot.lastTestAt ? `${agoMs(bot.lastTestAt)} · ${bot.lastTestOk ? 'Telegram accepted it' : 'Failed'}` : 'Never'}</dd>
-              <dt className="text-muted">Last report delivered</dt>
-              <dd className="text-ink">{bot.lastDeliveryAt ? agoMs(bot.lastDeliveryAt) : 'None yet'}</dd>
-              <dt className="text-muted">Waiting to be sent</dt>
-              <dd className="text-ink">{bot.pending}</dd>
-              <dt className="text-muted">Failed in the last 24 h</dt>
-              <dd className={bot.failed24h ? 'text-warn' : 'text-ink'}>{bot.failed24h}{bot.dead ? ` · ${bot.dead} gave up` : ''}</dd>
-            </dl>
-            {bot.lastTestOk === false && bot.lastTestError && <Notice tone="danger" title="The last test failed">{bot.lastTestError}</Notice>}
-            {bot.lastDeliveryError && <Notice tone="warn" title="A report could not be delivered">{bot.lastDeliveryError} SENTRIX keeps retrying. A delivery problem never changes a scan result.</Notice>}
-            <div className="flex flex-wrap gap-3">
-              <Button variant="primary" busy={busy === 'test'} disabled={!t.allowed} onClick={() => run('test', () => api.tgTest(), (s) => { set(s); toast(s.bot.lastTestOk ? 'ok' : 'danger', s.bot.lastTestOk ? 'Telegram accepted the test message.' : s.bot.lastTestError ?? 'The test failed.'); })}>
-                <Send className="size-4" /> Send a test message
-              </Button>
-              <Button variant="danger" onClick={() => setConfirmOff(true)}>
-                <Unplug className="size-4" /> Disconnect and remove token
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="mt-4 space-y-4">
-            <ol className="list-decimal space-y-1 pl-5 text-sm text-muted">
-              <li>In Telegram, open <span className="font-medium text-ink">@BotFather</span>, send <span className="font-mono">/newbot</span> and follow the steps. Copy the token it gives you.</li>
-              <li>Open your new bot and press <span className="font-medium text-ink">Start</span>, so the bot is allowed to message you.</li>
-              <li>Paste the token below and find your chat. SENTRIX only saves it after Telegram confirms the token and delivers a test message.</li>
-            </ol>
-            <label className="block text-sm">
-              <span className="font-medium text-ink">Bot token</span>
-              <div className="mt-2 flex max-w-xl gap-2">
-                <input
-                  type={show ? 'text' : 'password'}
-                  value={token}
-                  onChange={(e) => { setToken(e.target.value); setFound(null); }}
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="123456789:AA…"
-                  disabled={!t.allowed}
-                  className="w-full rounded border border-line bg-solid px-3 py-2 font-mono text-sm text-ink"
-                />
-                <Button aria-label={show ? 'Hide token' : 'Show token'} onClick={() => setShow((v) => !v)}>{show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</Button>
-              </div>
-              {token && !tokenLooksRight && <span className="mt-1 block text-xs text-warn">That does not look like a bot token (it should look like 123456789:ABC…).</span>}
-            </label>
-            <div className="flex flex-wrap items-end gap-3">
-              <Button busy={busy === 'detect'} disabled={!tokenLooksRight || !t.allowed} onClick={detect}>Find my chat</Button>
-              <label className="block text-sm">
-                <span className="font-medium text-ink">Chat ID</span>
-                <input inputMode="numeric" value={chat} onChange={(e) => setChat(e.target.value.replace(/[^\d-]/g, ''))} placeholder="Found automatically" disabled={!t.allowed} className="mt-2 block w-48 rounded border border-line bg-solid px-3 py-2 font-mono text-sm text-ink" />
-              </label>
-              <Button variant="primary" busy={busy === 'connect'} disabled={!tokenLooksRight || !Number(chat) || !t.allowed} onClick={connect}>Connect and send test</Button>
-            </div>
-            {found && found.length > 1 && (
-              <p className="text-sm text-muted">
-                Several chats have messaged this bot. Choose yours:{' '}
-                {found.map((id) => (
-                  <button key={id} className="mr-2 rounded-lg border border-line px-2 py-0.5 font-mono text-xs text-ink hover:border-strong" onClick={() => setChat(String(id))}>{id}</button>
-                ))}
-              </p>
-            )}
-            <p className="text-xs text-muted">The token is sent only to Telegram (api.telegram.org). It is stored encrypted with Windows data protection for your user account, never in a settings file, log, URL, or in any SENTRIX service.</p>
-          </div>
-        )}
-      </Card>
-
-      {bot.configured && (
-        <>
-          <Card className="px-5 py-3">
-            <h2 className="text-sm font-semibold text-ink">What to send me</h2>
-            <p className="mt-1 text-sm text-muted">Reports contain the file name, verdict, source and checks completed. File contents are never sent.</p>
-            <div className="mt-2 divide-y divide-line">
-              {PREFS.map(([k, label, desc]) => (
-                <Toggle key={k} checked={t.notify[k]} disabled={busy === 'opts' || !t.allowed} onChange={(v) => savePref(k, v)} label={label} description={desc} />
+          {token && !tokenOk && <p className="mt-1.5 text-xs text-warn">That does not look like a bot token.</p>}
+          {chats && (
+            <div className="mt-3 text-sm text-muted">
+              Several chats have messaged this bot. Which one is yours?{' '}
+              {chats.map((id) => (
+                <button key={id} className="mr-2 rounded-lg border border-strong px-2.5 py-1 font-mono text-xs text-ink hover:bg-surface2" onClick={() => connectTo(id)}>{id}</button>
               ))}
             </div>
+          )}
+          <details className="mt-3 text-sm">
+            <summary className="cursor-pointer text-muted hover:text-ink">The chat cannot be found automatically</summary>
+            <label className="mt-2 flex items-center gap-2 text-muted">
+              Chat ID
+              <input inputMode="numeric" value={manual} onChange={(e) => setManual(e.target.value.replace(/[^\d-]/g, ''))} className="h-9 w-44 rounded-lg border border-strong bg-solid px-3 font-mono text-sm text-ink" />
+            </label>
+          </details>
+          <p className="mt-4 text-xs text-muted">The token is stored encrypted for your Windows user and is only ever sent to Telegram. Telegram can read the reports it receives.</p>
+        </Card>
+      ) : (
+        <>
+          <Card className="p-5">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className={`size-6 ${healthy ? 'text-ok' : 'text-warn'}`} aria-hidden />
+                <div>
+                  <div className="text-sm font-semibold text-ink">{healthy ? 'Connected' : 'Connection problem'}{bot.username ? ` as @${bot.username}` : ''}</div>
+                  <div className="text-xs text-muted">
+                    {bot.lastDeliveryAt ? `Last report ${agoMs(bot.lastDeliveryAt)}` : 'No report sent yet'}
+                    {bot.pending > 0 ? ` · ${bot.pending} waiting` : ''}
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button busy={busy === 'test'} disabled={!t.allowed} onClick={() => run('test', () => api.tgTest(), (s) => { set(s); toast(s.bot.lastTestOk ? 'ok' : 'danger', s.bot.lastTestOk ? 'Telegram accepted the test message.' : s.bot.lastTestError ?? 'The test failed.'); })}>
+                  <Send className="size-4" /> Send test
+                </Button>
+                <Button variant="danger" onClick={() => setConfirmOff(true)}>Disconnect</Button>
+              </div>
+            </div>
+            {bot.lastTestOk === false && bot.lastTestError && <div className="mt-3"><Notice tone="danger">{bot.lastTestError}</Notice></div>}
+            {bot.lastDeliveryError && <div className="mt-3"><Notice tone="warn">Some reports could not be delivered and will be retried. {bot.lastDeliveryError}</Notice></div>}
           </Card>
 
-          <Card className="px-5 py-3">
-            <h2 className="text-sm font-semibold text-ink">Scan files I send to the bot</h2>
-            <div className="divide-y divide-line">
-              <Toggle
-                checked={t.acceptSubmissions}
-                disabled={busy === 'opts' || !t.allowed}
-                onChange={(v) => run('opts', () => api.tgSetOptions(t.notify, v), set)}
-                label="Accept files sent to my bot"
-                description="Send a file to your bot in Telegram and SENTRIX scans it on this computer and replies with the result. Only messages from the chat you connected are accepted; anything else is ignored and counted. Files over 20 MB cannot be downloaded through the Bot API and are reported as not checked. Your computer must be on and SENTRIX running."
-              />
-            </div>
-            <p className="mt-2 text-xs text-muted">Files are downloaded to an isolated temporary folder, scanned, and deleted. Ignored messages from other senders: {t.rejectedSubmissions}.</p>
+          <Card className="divide-y divide-line px-5 py-1">
+            <Toggle checked={t.notify.malicious} disabled={busy === 'opts' || !t.allowed} onChange={(v) => savePrefs({ malicious: v })} label="Dangerous files" description="A malware engine identified a file as malicious." />
+            <Toggle checked={t.notify.suspicious} disabled={busy === 'opts' || !t.allowed} onChange={(v) => savePrefs({ suspicious: v })} label="Suspicious files" description="Signs that deserve a closer look. Not proof of malware." />
+            <Toggle checked={problems} disabled={busy === 'opts' || !t.allowed} onChange={(v) => savePrefs({ engineProblems: v, protectionStopped: v })} label="Problems with SENTRIX" description="The scanner stopped, definitions are out of date, or a watched folder stopped working." />
+            <Toggle
+              checked={t.acceptSubmissions}
+              disabled={busy === 'opts' || !t.allowed}
+              onChange={(v) => run('opts', () => api.tgSetOptions(t.notify, v), set)}
+              label="Scan files I send to my bot"
+              description="Send a file to your bot and get the result back. Only your own chat is accepted, files up to 20 MB, and this computer must be on."
+            />
           </Card>
         </>
       )}
 
       <Card className="p-5">
-        <h2 className="text-sm font-semibold text-ink">Telegram Desktop downloads</h2>
-        <p className="mt-1 text-sm text-muted">Files Telegram Desktop saves to your computer are scanned like any other download, and labelled “Telegram Desktop” in your history and reports. This works without a bot and without signing in to anything.</p>
-        <dl className="mt-4 grid max-w-xl grid-cols-[12rem_1fr] gap-y-2 text-sm">
-          <dt className="text-muted">Telegram Desktop</dt>
-          <dd className="text-ink">{d.detection.installed ? 'Found on this computer' : 'Not found'}</dd>
-          <dt className="text-muted">Watched folder</dt>
-          <dd className="break-all font-mono text-xs text-ink">{d.folder ?? 'None'}</dd>
-          <dt className="text-muted">Status</dt>
-          <dd><Pill tone={d.watching ? 'ok' : d.folder ? 'warn' : 'muted'}>{d.watching ? 'Watching' : d.folder ? (d.exists ? 'Not watching' : 'Folder missing') : 'Off'}</Pill></dd>
-          <dt className="text-muted">Scanned so far</dt>
-          <dd className="text-ink">{d.scanned} · {d.threats} flagged</dd>
-        </dl>
-        {d.error && <div className="mt-3"><Notice tone="warn">{d.error}</Notice></div>}
-        {d.detection.candidates.length > 0 && !d.folder && (
-          <div className="mt-4 space-y-2">
-            <div className="text-sm font-medium text-ink">Possible Telegram folders</div>
-            {d.detection.candidates.map((c) => (
-              <div key={c.path} className="flex items-center justify-between gap-3 rounded border border-line px-3 py-2">
-                <div className="min-w-0">
-                  <div className="truncate font-mono text-xs text-ink" title={c.path}>{c.path}</div>
-                  <div className="text-xs text-muted">{c.exists ? `${c.fileCount} file(s)` : 'Does not exist yet'}</div>
-                </div>
-                <Button disabled={!c.exists} busy={busy === 'folder'} onClick={() => run('folder', () => api.tgSetDesktopFolder(c.path), set)}>Watch this</Button>
-              </div>
-            ))}
-            <p className="text-xs text-muted">SENTRIX cannot read Telegram's own settings, so check these against Telegram Desktop → Settings → Advanced → Download path.</p>
-          </div>
-        )}
-        <div className="mt-4 flex flex-wrap gap-3">
-          <Button onClick={pickFolder} busy={busy === 'folder'}><FolderOpen className="size-4" /> Choose folder…</Button>
-          {d.folder && <Button variant="danger" onClick={() => run('folder', () => api.tgSetDesktopFolder(null), set)}>Stop watching</Button>}
-        </div>
-        <p className="mt-3 text-xs text-muted">Covers files that Telegram Desktop saved to disk. Media you have only viewed, or have not downloaded, is not on disk and is not scanned.</p>
-      </Card>
-
-      <Card className="p-5">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h2 className="text-sm font-semibold text-ink">Telegram account monitoring</h2>
-            <p className="mt-1 text-sm text-muted">Scanning attachments in your personal chats, groups and channels directly from your account.</p>
+            <h2 className="text-sm font-semibold text-ink">Telegram Desktop downloads</h2>
+            <p className="mt-0.5 text-sm text-muted">
+              {d.folder ? (d.watching ? `Watching ${d.folder}` : d.exists ? 'Not being watched right now.' : 'That folder no longer exists.') : d.detection.installed ? 'Scan files Telegram saves to this computer.' : 'Telegram Desktop was not found on this computer.'}
+            </p>
+            {d.folder && <p className="mt-0.5 text-xs text-muted">{d.scanned} scanned, {d.threats} flagged</p>}
           </div>
-          <Pill tone="muted">Not available in this build</Pill>
+          <div className="flex gap-2">
+            {d.folder ? (
+              <Button onClick={() => run('folder', () => api.tgSetDesktopFolder(null), set)}>Stop</Button>
+            ) : (
+              candidate && <Button variant="primary" busy={busy === 'folder'} onClick={() => run('folder', () => api.tgSetDesktopFolder(candidate.path), set)}>Watch it</Button>
+            )}
+            <Button onClick={pickFolder}><FolderOpen className="size-4" /> {d.folder ? 'Change' : 'Choose folder'}</Button>
+          </div>
         </div>
-        <p className="mt-3 text-sm text-muted">{t.account.detail ?? 'Account-level monitoring is not implemented in this build.'}</p>
-        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-muted">
-          <li>When it exists it will only use Telegram's official API, with your own API credentials, and will never ask for your Telegram password, login codes or two-step password.</li>
-          <li>Even then it could only see attachments your account can download. It could not see secret chats, content you have not received, or messages deleted before they arrived.</li>
-          <li>Until then, use Telegram Desktop folder scanning and the bot above. They cover files saved to your computer and files you send to your bot, not every Telegram message.</li>
-        </ul>
+        {d.error && <div className="mt-3"><Notice tone="warn">{d.error}</Notice></div>}
+        {!d.folder && candidate && <p className="mt-2 text-xs text-muted">Found {candidate.path}. Check it matches Telegram, Settings, Advanced, Download path.</p>}
       </Card>
 
-      <Card className="overflow-hidden">
-        <div className="border-b border-line px-6 py-4">
-          <h2 className="text-sm font-semibold text-ink">Recent notifications</h2>
-          <p className="mt-0.5 text-sm text-muted">Messages SENTRIX queued for your bot. Delivery state comes from Telegram's response.</p>
-        </div>
-        {!t.recentNotifications.length ? (
-          <div className="px-6 py-5 text-sm text-muted">Nothing has been sent yet.</div>
-        ) : (
-          <ul className="divide-y divide-line">
-            {t.recentNotifications.map((n) => (
-              <li key={n.id} className="flex items-start justify-between gap-4 px-6 py-3">
-                <div className="min-w-0">
-                  <div className="text-sm text-ink">{n.kind.replace(/_/g, ' ')}</div>
-                  <div className="text-xs text-muted" title={whenMs(n.createdAt)}>{agoMs(n.createdAt)}{n.attempts > 1 ? ` · ${n.attempts} attempts` : ''}</div>
-                  {n.lastError && n.state !== 'sent' && <div className="mt-0.5 text-xs text-warn">{n.lastError}</div>}
-                </div>
-                <Pill tone={n.state === 'sent' ? 'ok' : n.state === 'dead' ? 'danger' : 'warn'}>{n.state === 'sent' ? 'Delivered' : n.state === 'dead' ? 'Gave up' : 'Waiting'}</Pill>
-              </li>
+      {bot.configured && (
+        <Disclosure title="More options">
+          <div className="divide-y divide-line px-5 py-1">
+            {MORE.map(([k, label]) => (
+              <Toggle key={k} checked={t.notify[k]} disabled={busy === 'opts' || !t.allowed} onChange={(v) => savePrefs({ [k]: v })} label={label} />
             ))}
-          </ul>
-        )}
-      </Card>
+          </div>
+          {t.recentNotifications.length > 0 && (
+            <ul className="divide-y divide-line border-t border-line">
+              {t.recentNotifications.slice(0, 8).map((n) => (
+                <li key={n.id} className="flex items-center justify-between gap-4 px-5 py-2.5 text-sm">
+                  <span className="text-ink">{n.kind.replace(/_/g, ' ')} <span className="text-xs text-muted">{agoMs(n.createdAt)}</span></span>
+                  <Pill tone={n.state === 'sent' ? 'ok' : n.state === 'dead' ? 'danger' : 'warn'}>{n.state === 'sent' ? 'Delivered' : n.state === 'dead' ? 'Gave up' : 'Waiting'}</Pill>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="border-t border-line px-5 py-3 text-xs text-muted">Scanning your whole Telegram account (chats, groups, channels) is not available in this version. It only covers Telegram Desktop downloads and files you send to your bot.</p>
+        </Disclosure>
+      )}
 
       <Modal
         open={confirmOff}
@@ -275,12 +221,11 @@ export function Telegram() {
         footer={
           <>
             <Button onClick={() => setConfirmOff(false)}>Cancel</Button>
-            <Button variant="danger" busy={busy === 'off'} onClick={async () => { await run('off', () => api.tgDisconnect(), (s) => { set(s); toast('ok', 'Bot disconnected and the token was removed from this computer.'); }); setConfirmOff(false); }}>Disconnect</Button>
+            <Button variant="danger" busy={busy === 'off'} onClick={async () => { await run('off', () => api.tgDisconnect(), (s) => { set(s); toast('ok', 'Disconnected. The token was removed from this computer.'); }); setConfirmOff(false); }}>Disconnect</Button>
           </>
         }
       >
-        <p>The saved token is erased from this computer, queued messages are discarded, and SENTRIX stops sending reports and reading files from the bot.</p>
-        <p className="mt-2">This does not delete the bot. To make the old token unusable, revoke it with <span className="font-mono">/revoke</span> in @BotFather.</p>
+        <p>The saved token is erased from this computer and reports stop. To make the old token useless everywhere, also send /revoke to @BotFather.</p>
       </Modal>
     </div>
   );
