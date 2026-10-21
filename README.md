@@ -1,4 +1,4 @@
-# SENTRIX: Intelligent File Security
+# SENTRIX
 
 A Windows desktop file-protection product with a centralized, independently deployable administration console.
 

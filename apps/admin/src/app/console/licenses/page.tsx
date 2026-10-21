@@ -95,7 +95,7 @@ export default function Licenses() {
 
       <Modal open={!!created} onClose={() => setCreated(null)} title="License key" footer={<Button variant="primary" onClick={() => setCreated(null)}>Done</Button>}>
         <p className="mb-3">Copy this key now. It is shown once; only a hash is stored.</p>
-        <div className="select-all rounded-xl border border-line bg-surface2 p-4 text-center font-mono text-base tracking-wider text-ink">{created}</div>
+        <div className="select-all rounded border border-line bg-surface2 p-4 text-center font-mono text-base tracking-wider text-ink">{created}</div>
       </Modal>
 
       <Modal open={!!revoke} onClose={() => setRevoke(null)} title="Revoke this license?" footer={<><Button onClick={() => setRevoke(null)}>Cancel</Button><Button variant="danger" busy={busy} onClick={doRevoke}>Revoke license</Button></>}>

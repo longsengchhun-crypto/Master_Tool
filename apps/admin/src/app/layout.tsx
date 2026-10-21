@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: { default: 'SENTRIX: Intelligent File Security', template: '%s · SENTRIX' },
-  description: 'Layered file protection for Windows with honest, plain-language security reports.',
+  title: { default: 'SENTRIX: file scanning for Windows', template: '%s · SENTRIX' },
+  description: 'File scanning for Windows that reports what it checked and what it could not.',
   icons: { icon: '/icon.svg' },
 };
 

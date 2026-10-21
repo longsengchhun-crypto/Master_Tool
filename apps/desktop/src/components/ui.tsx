@@ -13,17 +13,16 @@ export function Button({
   disabled,
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: BtnVariant; busy?: boolean }) {
-  const base =
-    'inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none select-none';
+  const base = 'inline-flex h-8 select-none items-center justify-center gap-2 rounded px-3 text-sm font-semibold transition-colors disabled:pointer-events-none disabled:opacity-50';
   const styles: Record<BtnVariant, string> = {
-    primary: 'bg-gradient-to-br from-accent to-accent2 text-accentink shadow-lg shadow-accent/20 hover:brightness-110',
-    secondary: 'bg-solid border border-line text-ink hover:border-strong hover:bg-surface2',
-    ghost: 'text-muted hover:text-ink hover:bg-surface2',
-    danger: 'bg-dangerbg text-danger border border-danger/30 hover:bg-danger/20',
+    primary: 'bg-accent text-accentink hover:bg-accenthover',
+    secondary: 'border border-strong bg-solid text-ink hover:bg-surface2',
+    ghost: 'text-ink hover:bg-surface2',
+    danger: 'border border-danger/60 bg-solid text-danger hover:bg-dangerbg',
   };
   return (
     <button className={`${base} ${styles[variant]} ${className}`} disabled={disabled || busy} {...rest}>
-      {busy && <Loader2 className="size-4 animate-spin" aria-hidden />}
+      {busy && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
       {children}
     </button>
   );
@@ -31,8 +30,36 @@ export function Button({
 
 export function Card({ children, className = '', ...rest }: { children: ReactNode; className?: string } & React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={`glass rounded-2xl ${className}`} {...rest}>
+    <div className={`panel rounded-lg ${className}`} {...rest}>
       {children}
+    </div>
+  );
+}
+
+/** A titled block: the standard way to group related facts on a page. */
+export function Section({ title, aside, children, className = '' }: { title: string; aside?: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <section className={`panel rounded-lg ${className}`}>
+      <header className="flex min-h-11 items-center justify-between gap-4 border-b border-line px-4">
+        <h2 className="text-sm font-semibold text-ink">{title}</h2>
+        {aside}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+/** Label/value rows with hairline separators. Replaces ad-hoc grids of stat cards. */
+export function Rows({ children }: { children: ReactNode }) {
+  return <dl className="divide-y divide-line text-sm">{children}</dl>;
+}
+
+export function Row({ label, children, tone }: { label: ReactNode; children: ReactNode; tone?: 'ok' | 'warn' | 'danger' | 'muted' }) {
+  const c = tone === 'ok' ? 'text-ok' : tone === 'warn' ? 'text-warn' : tone === 'danger' ? 'text-danger' : tone === 'muted' ? 'text-muted' : 'text-ink';
+  return (
+    <div className="flex min-h-9 items-center justify-between gap-6 px-4 py-1.5">
+      <dt className="text-muted">{label}</dt>
+      <dd className={`min-w-0 text-right ${c}`}>{children}</dd>
     </div>
   );
 }
@@ -41,16 +68,15 @@ const VERDICT_STYLE: Record<Verdict, string> = {
   CLEAN: 'bg-okbg text-ok',
   SUSPICIOUS: 'bg-warnbg text-warn',
   MALICIOUS: 'bg-dangerbg text-danger',
-  UNABLE_TO_VERIFY: 'bg-surface2 text-muted border border-line',
+  UNABLE_TO_VERIFY: 'bg-surface2 text-muted',
   PENDING: 'bg-infobg text-info',
 };
 
 export function VerdictBadge({ verdict, incomplete }: { verdict: Verdict; incomplete?: boolean }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${VERDICT_STYLE[verdict]}`}>
-      <span className="size-1.5 rounded-full bg-current" aria-hidden />
+    <span className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-semibold ${VERDICT_STYLE[verdict]}`}>
       {VERDICT_LABEL[verdict]}
-      {incomplete && verdict !== 'UNABLE_TO_VERIFY' && <span className="font-normal opacity-80">· partial</span>}
+      {incomplete && verdict !== 'UNABLE_TO_VERIFY' && <span className="font-normal opacity-80">(partial)</span>}
     </span>
   );
 }
@@ -63,18 +89,18 @@ export function Pill({ tone, children }: { tone: 'ok' | 'warn' | 'danger' | 'mut
     info: 'bg-infobg text-info',
     muted: 'bg-surface2 text-muted',
   }[tone];
-  return <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${t}`}>{children}</span>;
+  return <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold ${t}`}>{children}</span>;
 }
 
 export function Toggle({ checked, onChange, label, description, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; description?: string; disabled?: boolean }) {
   const id = useId();
   return (
-    <div className="flex items-start justify-between gap-6 py-3">
+    <div className="flex items-start justify-between gap-8 py-3">
       <div className="min-w-0">
-        <label htmlFor={id} className="block text-sm font-medium text-ink">
+        <label htmlFor={id} className="block text-sm font-semibold text-ink">
           {label}
         </label>
-        {description && <p className="mt-0.5 text-sm text-muted">{description}</p>}
+        {description && <p className="mt-0.5 max-w-xl text-sm text-muted">{description}</p>}
       </div>
       <button
         id={id}
@@ -82,9 +108,9 @@ export function Toggle({ checked, onChange, label, description, disabled }: { ch
         aria-checked={checked}
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full border transition ${checked ? 'border-transparent bg-gradient-to-r from-accent to-accent2' : 'border-strong bg-surface2'} disabled:opacity-50`}
+        className={`relative mt-0.5 h-5 w-10 shrink-0 rounded-full border transition-colors disabled:opacity-50 ${checked ? 'border-accent bg-accent' : 'border-strong bg-transparent'}`}
       >
-        <span className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-all ${checked ? 'left-[22px]' : 'left-0.5'}`} />
+        <span className={`absolute top-1/2 size-3 -translate-y-1/2 rounded-full transition-all ${checked ? 'left-[22px] bg-accentink' : 'left-1 bg-muted'}`} />
       </button>
     </div>
   );
@@ -105,26 +131,26 @@ export function Modal({ open, onClose, title, children, footer }: { open: boolea
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-6 backdrop-blur-sm" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className="rise glass w-full max-w-lg rounded-2xl bg-solid p-6 outline-none" style={{ background: 'var(--surface-solid)' }}>
-        <div className="mb-4 flex items-start justify-between gap-4">
-          <h2 className="text-lg font-semibold text-ink">{title}</h2>
-          <button aria-label="Close" onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-surface2 hover:text-ink">
-            <X className="size-5" />
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className="panel w-full max-w-md rounded-lg shadow-2xl outline-none">
+        <div className="flex items-center justify-between gap-4 px-5 pt-4">
+          <h2 className="text-base font-semibold text-ink">{title}</h2>
+          <button aria-label="Close" onClick={onClose} className="rounded p-1 text-muted hover:bg-surface2 hover:text-ink">
+            <X className="size-4" />
           </button>
         </div>
-        <div className="text-sm text-muted">{children}</div>
-        {footer && <div className="mt-6 flex justify-end gap-3">{footer}</div>}
+        <div className="px-5 py-3 text-sm text-muted">{children}</div>
+        {footer && <div className="flex justify-end gap-2 border-t border-line bg-bg px-5 py-3">{footer}</div>}
       </div>
     </div>
   );
 }
 
-export function Empty({ icon, title, children }: { icon: ReactNode; title: string; children?: ReactNode }) {
+export function Empty({ icon, title, children }: { icon?: ReactNode; title: string; children?: ReactNode }) {
   return (
-    <div className="grid place-items-center px-6 py-16 text-center">
-      <div className="mb-4 grid size-14 place-items-center rounded-2xl bg-surface2 text-muted">{icon}</div>
-      <h3 className="text-base font-semibold text-ink">{title}</h3>
+    <div className="flex flex-col items-center px-6 py-14 text-center">
+      {icon && <div className="mb-3 text-faint">{icon}</div>}
+      <h3 className="text-sm font-semibold text-ink">{title}</h3>
       {children && <p className="mt-1 max-w-sm text-sm text-muted">{children}</p>}
     </div>
   );
@@ -132,22 +158,27 @@ export function Empty({ icon, title, children }: { icon: ReactNode; title: strin
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
   return (
-    <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
+    <header className="mb-5 flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">{title}</h1>
+        <h1 className="text-xl font-semibold text-ink">{title}</h1>
         {subtitle && <p className="mt-1 max-w-2xl text-sm text-muted">{subtitle}</p>}
       </div>
-      {actions && <div className="flex gap-3">{actions}</div>}
+      {actions && <div className="flex gap-2">{actions}</div>}
     </header>
   );
 }
 
 export function Notice({ tone, title, children }: { tone: 'warn' | 'danger' | 'info' | 'ok'; title?: string; children: ReactNode }) {
-  const t = { warn: 'bg-warnbg text-warn', danger: 'bg-dangerbg text-danger', info: 'bg-infobg text-info', ok: 'bg-okbg text-ok' }[tone];
+  const t = {
+    warn: 'border-warn bg-warnbg',
+    danger: 'border-danger bg-dangerbg',
+    info: 'border-info bg-infobg',
+    ok: 'border-ok bg-okbg',
+  }[tone];
   return (
-    <div role={tone === 'danger' ? 'alert' : 'status'} className={`rounded-xl px-4 py-3 text-sm ${t}`}>
+    <div role={tone === 'danger' ? 'alert' : 'status'} className={`rounded border-l-[3px] px-4 py-2.5 text-sm text-ink ${t}`}>
       {title && <div className="font-semibold">{title}</div>}
-      <div className={title ? 'mt-0.5 opacity-90' : ''}>{children}</div>
+      <div className={title ? 'mt-0.5 text-ink/85' : ''}>{children}</div>
     </div>
   );
 }

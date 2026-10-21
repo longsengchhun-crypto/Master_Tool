@@ -41,8 +41,8 @@ export default function MfaSetup({ csrf, email }: { csrf: string; email: string 
   }
 
   return (
-    <main className="ambient grid min-h-screen place-items-center p-6">
-      <div className="glass w-full max-w-lg rounded-3xl p-8" style={{ background: 'var(--surface-solid)' }}>
+    <main className="grid min-h-screen place-items-center p-6">
+      <div className="panel w-full max-w-lg rounded-lg p-7">
         <div className="mb-6 flex items-center gap-3">
           <Logo size={40} />
           <div>
@@ -58,7 +58,7 @@ export default function MfaSetup({ csrf, email }: { csrf: string; email: string 
               <li>Add an account using this setup key. It is shown once, so enter it now.</li>
             </ol>
             {secret ? (
-              <div className="rounded-xl border border-line bg-surface2 p-4">
+              <div className="rounded border border-line bg-surface2 p-4">
                 <div className="text-xs text-muted">Setup key</div>
                 <div className="mt-1 select-all break-all font-mono text-base tracking-wider text-ink">{secret.match(/.{1,4}/g)?.join(' ')}</div>
                 {uri && (
@@ -83,7 +83,7 @@ export default function MfaSetup({ csrf, email }: { csrf: string; email: string 
             <Notice tone="warn" title="Save your recovery codes now">
               Each code works once if you lose your authenticator. They are shown only this time and are stored only as hashes.
             </Notice>
-            <ul className="grid grid-cols-2 gap-2 rounded-xl border border-line bg-surface2 p-4 font-mono text-sm text-ink">
+            <ul className="grid grid-cols-2 gap-2 rounded border border-line bg-surface2 p-4 font-mono text-sm text-ink">
               {codes.map((c) => (
                 <li key={c} className="select-all">{c}</li>
               ))}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { Building2, KeyRound, LogOut, RefreshCw } from 'lucide-react';
+import { LogOut, RefreshCw } from 'lucide-react';
 import { api, errText } from '../lib/api';
 import { useApp } from '../lib/app';
 import { ago, when } from '../lib/format';
@@ -86,22 +86,22 @@ export function Account() {
 
       {!acct.enrolled ? (
         <>
-          <Card className="p-6">
+          <Card className="p-5">
             <div className="flex items-start gap-4">
-              <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-surface2 text-muted"><Building2 className="size-5" /></div>
+              
               <div>
-                <h2 className="text-base font-semibold text-ink">This device is not managed</h2>
+                <h2 className="text-sm font-semibold text-ink">This device is not managed</h2>
                 <p className="mt-1 text-sm text-muted">Nothing about this device is shared with anyone. If your IT administrator gave you an enrollment code, you can enroll below.</p>
               </div>
             </div>
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <label className="block text-sm">
                 <span className="font-medium text-ink">Console address</span>
-                <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://console.yourcompany.com" className="mt-2 w-full rounded-xl border border-line bg-solid px-3 py-2.5 text-ink placeholder:text-faint" autoComplete="off" spellCheck={false} />
+                <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://console.yourcompany.com" className="mt-2 w-full rounded border border-line bg-solid px-3 py-2.5 text-ink placeholder:text-faint" autoComplete="off" spellCheck={false} />
               </label>
               <label className="block text-sm">
                 <span className="font-medium text-ink">Enrollment code</span>
-                <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="SX-XXXX-XXXX-XXXX-XXXX" className="mt-2 w-full rounded-xl border border-line bg-solid px-3 py-2.5 font-mono text-ink placeholder:text-faint" autoComplete="off" spellCheck={false} />
+                <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="SX-XXXX-XXXX-XXXX-XXXX" className="mt-2 w-full rounded border border-line bg-solid px-3 py-2.5 font-mono text-ink placeholder:text-faint" autoComplete="off" spellCheck={false} />
               </label>
             </div>
             {error && (
@@ -119,7 +119,7 @@ export function Account() {
         </>
       ) : (
         <>
-          <Card className="p-6">
+          <Card className="p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <div className="text-sm text-muted">Managed by</div>
@@ -146,12 +146,12 @@ export function Account() {
             )}
           </Card>
 
-          <Card className="p-6">
+          <Card className="p-5">
             <div className="flex items-start gap-4">
-              <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-surface2 text-muted"><KeyRound className="size-5" /></div>
+              
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-base font-semibold text-ink">License</h2>
+                  <h2 className="text-sm font-semibold text-ink">License</h2>
                   {lic && <Pill tone={lic.tone}>{lic.label}</Pill>}
                 </div>
                 <p className="mt-1 text-sm text-muted">{lic?.body ?? 'License status has not been reported yet.'}</p>
@@ -189,8 +189,8 @@ export function Account() {
 
 function Disclosure({ enrolled }: { enrolled?: boolean }) {
   return (
-    <Card className="p-6">
-      <h2 className="text-base font-semibold text-ink">{enrolled ? 'What your organization can do' : 'If you enroll, this is exactly what happens'}</h2>
+    <Card className="p-5">
+      <h2 className="text-sm font-semibold text-ink">{enrolled ? 'What your organization can do' : 'If you enroll, this is exactly what happens'}</h2>
       <div className="mt-4 grid gap-6 md:grid-cols-2">
         <div>
           <h3 className="text-sm font-medium text-ink">They can see</h3>

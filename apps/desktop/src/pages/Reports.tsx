@@ -33,7 +33,7 @@ export function Reports() {
             <label className="relative block">
               <span className="sr-only">Search reports</span>
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, path or hash" className="w-full rounded-xl border border-line bg-solid py-2 pl-9 pr-3 text-sm text-ink placeholder:text-faint" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, path or hash" className="w-full rounded border border-line bg-solid py-2 pl-9 pr-3 text-sm text-ink placeholder:text-faint" />
             </label>
           </div>
           <ul className="max-h-[calc(100vh-290px)] divide-y divide-line overflow-auto">
@@ -61,7 +61,7 @@ export function Reports() {
             ))}
           </ul>
         </Card>
-        <Card className="p-6">
+        <Card className="p-5">
           {selected ? <ReportView key={selected.id} report={selected} onChanged={load} /> : <Empty icon={<FileText className="size-6" />} title="Select a report">Choose a scan on the left to read the full report.</Empty>}
         </Card>
       </div>

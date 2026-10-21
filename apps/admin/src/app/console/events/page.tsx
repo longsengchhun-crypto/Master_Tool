@@ -15,7 +15,7 @@ export default function Events() {
       <PageHeader title="Security events" subtitle="Findings carry a file hash and verdict, never file contents. File names appear only where the organization's policy allows sending them." />
       {error && <Notice tone="danger">{error}</Notice>}
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted">Findings</h2>
+        <h2 className="mb-3 text-sm font-semibold text-ink">Findings</h2>
         <Card className="overflow-hidden">
           {loading ? <Empty>Loading…</Empty> : !data?.findings.length ? <Empty>No suspicious or malicious findings have been reported.</Empty> : (
             <Table head={['When', 'Device', 'Verdict', 'SHA-256', 'Source']}>
@@ -33,7 +33,7 @@ export default function Events() {
         </Card>
       </section>
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted">Device events</h2>
+        <h2 className="mb-3 text-sm font-semibold text-ink">Device events</h2>
         <Card className="overflow-hidden">
           {loading ? <Empty>Loading…</Empty> : !data?.events.length ? <Empty>No device events.</Empty> : (
             <Table head={['When', 'Device', 'Event', 'Severity']}>

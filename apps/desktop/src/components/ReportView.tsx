@@ -62,7 +62,7 @@ export function ReportView({ report: r, onChanged }: { report: ScanReport; onCha
   const canQuarantine = !r.quarantined && r.verdict !== 'CLEAN' && !!r.file.sha256;
 
   return (
-    <div className="rise space-y-5">
+    <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate text-xl font-semibold text-ink" title={r.file.name}>
@@ -160,7 +160,7 @@ export function ReportView({ report: r, onChanged }: { report: ScanReport; onCha
 
       <section>
         <h3 className="mb-2 text-sm font-semibold text-ink">What we checked</h3>
-        <ul className="divide-y divide-line rounded-xl border border-line">
+        <ul className="divide-y divide-line rounded border border-line">
           {r.checks.map((c, i) => (
             <li key={`${c.id}-${i}`} className="flex items-start gap-3 px-4 py-3">
               <span className="mt-0.5">
@@ -194,7 +194,7 @@ export function ReportView({ report: r, onChanged }: { report: ScanReport; onCha
           <h3 className="mb-2 text-sm font-semibold text-ink">Findings</h3>
           <ul className="space-y-2">
             {r.findings.map((f, i) => (
-              <li key={i} className="rounded-xl border border-line px-4 py-3">
+              <li key={i} className="rounded border border-line px-4 py-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`rounded-md px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${SEV[f.severity]}`}>{f.severity}</span>
                   <span className="text-sm font-medium text-ink">{f.name}</span>
@@ -216,7 +216,7 @@ export function ReportView({ report: r, onChanged }: { report: ScanReport; onCha
           <ChevronDown className={`size-4 transition ${tech ? 'rotate-180' : ''}`} /> Technical details
         </button>
         {tech && (
-          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 rounded-xl bg-surface2 p-4 text-xs">
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 rounded bg-surface2 p-4 text-xs">
             <dt className="text-faint">Location</dt>
             <dd className="break-all font-mono text-ink">{r.file.path}</dd>
             <dt className="text-faint">SHA-256</dt>

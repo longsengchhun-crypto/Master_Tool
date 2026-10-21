@@ -115,3 +115,14 @@ Local by default. The only things that leave a device are listed in the in-app A
 signature downloads (no file info), an update check (version + platform + random install id), and, **only if enrolled**,
 status heartbeats; **only if the user also enables health reporting**, scan counts plus hash + verdict per finding.
 File contents are never transmitted; file names only if both the user's reporting switch and the organization policy allow it.
+
+## Visual design
+
+One design language across the desktop app, console and site (`index.css` / `globals.css` hold the tokens):
+
+* Windows-native: Segoe UI Variable, Fluent-style neutrals, one flat accent (`#0f6cbd` light, `#479ef5` dark), status colours
+  only for status. Both themes are authored separately; every text-on-background token pair in use was computed at 4.5:1 or better (WCAG AA for body text).
+* Flat surfaces with hairline borders, 4 px controls and 8 px panels; no gradients, glow, blur or entrance animations.
+* Information is shown as label/value rows and tables (`Section`, `Rows`, `Row` in each `ui.tsx`), not grids of stat cards.
+* Status colour never appears without text: a state is always written out.
+* Brand: flat geometric "S" on a navy tile (`apps/desktop/brand/*.svg`; `npm run icons -w @sentrix/desktop` regenerates the PNG/ICO/ICNS).

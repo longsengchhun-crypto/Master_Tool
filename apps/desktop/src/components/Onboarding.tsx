@@ -1,21 +1,18 @@
 import { useState } from 'react';
-import { Check, Download, Eye, Lock, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { Check, Download } from 'lucide-react';
 import { api, errText } from '../lib/api';
 import { useApp } from '../lib/app';
 import { Logo } from './Logo';
 import { Button, Notice } from './ui';
 
-const STEPS = ['Welcome', 'What to expect', 'Privacy', 'Set up'] as const;
+const STEPS = ['Before you start', 'Set up protection'] as const;
 
-function Point({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
+function Item({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <li className="flex gap-4">
-      <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl bg-surface2 text-accent">{icon}</span>
-      <div>
-        <div className="text-sm font-semibold text-ink">{title}</div>
-        <div className="mt-0.5 text-sm text-muted">{children}</div>
-      </div>
-    </li>
+    <div className="border-t border-line py-3 first:border-t-0 first:pt-0">
+      <h3 className="text-sm font-semibold text-ink">{title}</h3>
+      <p className="mt-0.5 text-sm text-muted">{children}</p>
+    </div>
   );
 }
 
@@ -56,113 +53,90 @@ export function Onboarding() {
   };
 
   return (
-    <div className="ambient fixed inset-0 z-40 grid place-items-center overflow-auto bg-bg p-6">
-      <div className="glass rise w-full max-w-2xl rounded-3xl p-10" style={{ background: 'var(--surface-solid)' }}>
-        <div className="mb-8 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Logo size={36} />
-            <div>
-              <div className="text-lg font-semibold leading-tight tracking-tight text-ink">SENTRIX</div>
-              <div className="text-xs text-muted">Intelligent File Security</div>
-            </div>
+    <div className="fixed inset-0 z-40 grid place-items-center overflow-auto bg-bg p-6">
+      <div className="panel flex w-full max-w-3xl overflow-hidden rounded-lg shadow-xl">
+        <aside className="hidden w-52 shrink-0 flex-col border-r border-line bg-elev p-5 sm:flex">
+          <div className="flex items-center gap-2.5">
+            <Logo size={26} />
+            <span className="text-[13px] font-semibold tracking-[0.12em] text-ink">SENTRIX</span>
           </div>
-          <ol className="flex items-center gap-2" aria-label="Setup progress">
+          <ol className="mt-8 space-y-3 text-sm" aria-label="Setup progress">
             {STEPS.map((s, i) => (
-              <li key={s} aria-current={i === step ? 'step' : undefined} className={`h-1.5 w-8 rounded-full transition ${i <= step ? 'bg-gradient-to-r from-accent to-accent2' : 'bg-surface2'}`} title={s} />
+              <li key={s} aria-current={i === step ? 'step' : undefined} className={`flex items-center gap-2.5 ${i === step ? 'font-semibold text-ink' : 'text-muted'}`}>
+                <span className={`grid size-5 place-items-center rounded-full border text-xs ${i < step ? 'border-ok bg-ok text-white' : i === step ? 'border-accent text-accent' : 'border-strong text-faint'}`}>
+                  {i < step ? <Check className="size-3" /> : i + 1}
+                </span>
+                {s}
+              </li>
             ))}
           </ol>
-        </div>
+        </aside>
 
-        {step === 0 && (
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight text-ink">Know what is in a file before you open it.</h1>
-            <p className="mt-3 text-muted">SENTRIX inspects files with a layered detection engine and explains each result in plain language. When something needs attention, it tells you why and what you can do next.</p>
-            <ul className="mt-8 space-y-5">
-              <Point icon={<ShieldCheck className="size-5" />} title="Layered checks">Malware signatures, file-structure analysis, digital signatures and heuristics work together.</Point>
-              <Point icon={<Eye className="size-5" />} title="Honest results">If a check could not run or a file could not be fully inspected, SENTRIX says so instead of showing a reassuring tick.</Point>
-              <Point icon={<Lock className="size-5" />} title="Safe quarantine">Suspicious files can be locked away in encrypted storage and restored if they turn out to be fine.</Point>
-            </ul>
-          </div>
-        )}
-
-        {step === 1 && (
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-ink">What SENTRIX can and cannot do</h1>
-            <p className="mt-2 text-muted">Security tools are easy to over-trust, so here is the plain version.</p>
-            <ul className="mt-6 space-y-5">
-              <Point icon={<Check className="size-5" />} title="It scans and warns">It checks the files you choose, and new files in folders you pick, then tells you what it found.</Point>
-              <Point icon={<TriangleAlert className="size-5" />} title="It does not block programs from running">Stopping every program from launching needs a deep operating-system component that this release does not include. Keep Windows Security turned on: SENTRIX adds to it and does not replace it.</Point>
-              <Point icon={<TriangleAlert className="size-5" />} title="No scanner finds everything">"Clean" means the checks that ran found nothing. It is not a guarantee, so stay careful with files from unknown sources.</Point>
-            </ul>
-          </div>
-        )}
-
-        {step === 2 && (
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-ink">Your files stay on your computer</h1>
-            <ul className="mt-6 space-y-5">
-              <Point icon={<Lock className="size-5" />} title="Scanning is local">File contents are never uploaded. Scan history and quarantine are stored on this device.</Point>
-              <Point icon={<Download className="size-5" />} title="One kind of download">SENTRIX downloads malware signatures from ClamAV's public servers. These requests do not include anything about your files.</Point>
-              <Point icon={<Eye className="size-5" />} title="Nothing is shared by default">If your organization enrolls this device, you will see that clearly in Account, and you control optional health reporting in Settings. Turning it off never turns protection off.</Point>
-            </ul>
-          </div>
-        )}
-
-        {step === 3 && (
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-ink">Set up protection</h1>
-            <p className="mt-2 text-muted">SENTRIX needs malware signatures before it can say a file is clean.</p>
-
-            <div className="mt-6 rounded-2xl border border-line p-5">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-sm font-semibold text-ink">1. Download malware signatures</div>
-                  <div className="mt-0.5 text-sm text-muted">{engineReady ? 'Signatures are installed.' : 'About 300 MB, one time. Updates afterwards are much smaller.'}</div>
-                </div>
-                {engineReady ? (
-                  <span className="grid size-8 place-items-center rounded-full bg-okbg text-ok">
-                    <Check className="size-4" />
-                  </span>
-                ) : (
-                  <Button variant="primary" busy={updating} onClick={update}>
-                    <Download className="size-4" /> {updated === false ? 'Try again' : 'Download'}
-                  </Button>
-                )}
+        <div className="min-w-0 flex-1 p-7">
+          {step === 0 && (
+            <div>
+              <h1 className="text-xl font-semibold text-ink">Before you start</h1>
+              <p className="mt-1 text-sm text-muted">SENTRIX checks files and tells you what it found. It is one layer of protection, not all of it.</p>
+              <div className="mt-5">
+                <Item title="What it does">Scans the files you pick, and new files in the folders you choose, with the ClamAV signature engine plus structure, signature and heuristic checks. Every report lists what ran and what could not.</Item>
+                <Item title="What it does not do">It cannot stop a download, and it cannot stop a program from starting unless you turn on the execution guard for confirmed malware. No scanner finds everything: a clean result means the checks that ran found nothing. Keep Windows Security on.</Item>
+                <Item title="What stays on this computer">File contents are never uploaded. History and quarantine are stored here. The only downloads are malware signatures from ClamAV&apos;s public servers, which carry no information about your files. If you connect a Telegram bot, report text (file names and verdicts) goes to Telegram.</Item>
               </div>
-              {updating && <p className="mt-3 text-xs text-muted">Downloading and verifying signatures. This can take a few minutes…</p>}
             </div>
+          )}
 
-            <div className="mt-4 rounded-2xl border border-line p-5">
-              <div className="text-sm font-semibold text-ink">2. Real-time protection</div>
-              <label className="mt-3 flex cursor-pointer items-start gap-3">
-                <input type="checkbox" className="mt-1 size-4 accent-[var(--accent)]" checked={realtime} onChange={(e) => setRealtime(e.target.checked)} />
-                <span className="text-sm text-muted">
-                  <span className="font-medium text-ink">Scan new files in my Downloads folder.</span> I can change the folders, or turn this off, under Protection at any time.
+          {step === 1 && (
+            <div>
+              <h1 className="text-xl font-semibold text-ink">Set up protection</h1>
+              <p className="mt-1 text-sm text-muted">SENTRIX cannot call a file clean until the malware signatures are installed.</p>
+
+              <div className="mt-5 rounded border border-line p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-semibold text-ink">Malware signatures</div>
+                    <div className="mt-0.5 text-sm text-muted">{engineReady ? 'Installed.' : 'About 300 MB once. Later updates are much smaller.'}</div>
+                  </div>
+                  {engineReady ? (
+                    <span className="flex items-center gap-1.5 text-sm font-semibold text-ok"><Check className="size-4" /> Ready</span>
+                  ) : (
+                    <Button variant="primary" busy={updating} onClick={update}>
+                      <Download className="size-4" /> {updated === false ? 'Try again' : 'Download'}
+                    </Button>
+                  )}
+                </div>
+                {updating && <p className="mt-3 text-xs text-muted">Downloading and verifying. This can take a few minutes.</p>}
+              </div>
+
+              <label className="mt-3 flex cursor-pointer items-start gap-3 rounded border border-line p-4">
+                <input type="checkbox" className="mt-0.5 size-4 accent-[var(--accent)]" checked={realtime} onChange={(e) => setRealtime(e.target.checked)} />
+                <span className="text-sm">
+                  <span className="block font-semibold text-ink">Scan new files in Downloads automatically</span>
+                  <span className="text-muted">You can change the folders or turn this off later under Real-Time Protection.</span>
                 </span>
               </label>
-            </div>
 
-            {!engineReady && (
-              <div className="mt-4">
-                <Notice tone="warn">You can continue without signatures, but SENTRIX will show files as "Unable to verify" until they are installed.</Notice>
-              </div>
+              {!engineReady && (
+                <div className="mt-3">
+                  <Notice tone="warn">You can continue without signatures, but files will show as &quot;Unable to verify&quot; until they are installed.</Notice>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="mt-7 flex items-center justify-between border-t border-line pt-4">
+            <Button variant="ghost" disabled={step === 0} onClick={() => setStep((s) => s - 1)}>
+              Back
+            </Button>
+            {step < STEPS.length - 1 ? (
+              <Button variant="primary" onClick={() => setStep((s) => s + 1)}>
+                Continue
+              </Button>
+            ) : (
+              <Button variant="primary" busy={finishing} disabled={updating} onClick={finish}>
+                Finish
+              </Button>
             )}
           </div>
-        )}
-
-        <div className="mt-10 flex items-center justify-between">
-          <Button variant="ghost" disabled={step === 0} onClick={() => setStep((s) => s - 1)}>
-            Back
-          </Button>
-          {step < STEPS.length - 1 ? (
-            <Button variant="primary" onClick={() => setStep((s) => s + 1)}>
-              Continue
-            </Button>
-          ) : (
-            <Button variant="primary" busy={finishing} disabled={updating} onClick={finish}>
-              Start using SENTRIX
-            </Button>
-          )}
         </div>
       </div>
     </div>

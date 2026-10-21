@@ -48,7 +48,7 @@ export function History() {
           <Empty icon={<HistoryIcon className="size-6" />} title={rows.length ? 'Nothing in this view' : 'No scan history yet'}>{rows.length ? 'Try another filter.' : 'Scanned files are listed here.'}</Empty>
         ) : (
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-line text-xs uppercase tracking-wide text-muted">
+            <thead className="border-b border-line text-xs font-semibold text-muted">
               <tr>
                 <th className="px-5 py-3 font-medium">File</th>
                 <th className="px-3 py-3 font-medium">Source</th>

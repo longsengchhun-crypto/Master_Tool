@@ -5,8 +5,8 @@ export const metadata: Metadata = { title: 'Terms of service' };
 export default function Terms() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
-      <div className="mb-8 rounded-xl bg-warnbg px-4 py-3 text-sm text-warn">Draft for legal review. Placeholder terms that state the product&apos;s real limits; governing law, liability caps and entity details must be completed by counsel before launch.</div>
-      <h1 className="text-4xl font-semibold tracking-tight text-ink">Terms of service</h1>
+      <div className="mb-8 rounded bg-warnbg px-4 py-3 text-sm text-warn">Draft for legal review. Placeholder terms that state the product&apos;s real limits; governing law, liability caps and entity details must be completed by counsel before launch.</div>
+      <h1 className="text-3xl font-semibold text-ink">Terms of service</h1>
       <div className="mt-8 space-y-8 text-muted [&_h2]:mb-2 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-ink">
         <section><h2>No guarantee of protection</h2><p>SENTRIX is a file-inspection tool. It does not detect every threat, and a result of &quot;clean&quot; is not a guarantee that a file is safe. You remain responsible for the files you open and for maintaining other security measures, including the operating system&apos;s built-in protection.</p></section>
         <section><h2>Third-party components</h2><p>SENTRIX uses ClamAV, licensed under the GNU GPL v2, as a separate program. Its license and source availability are provided with the installer.</p></section>

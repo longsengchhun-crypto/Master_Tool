@@ -6,7 +6,7 @@ import { useApp } from '../lib/app';
 import { agoMs, splitPath, whenMs } from '../lib/format';
 import { usePolled } from '../lib/hooks';
 import type { Settings } from '../lib/types';
-import { Button, Card, Empty, Notice, PageHeader, Pill, Toggle } from '../components/ui';
+import { Button, Card, Empty, Notice, PageHeader, Pill, Row, Rows, Section, Toggle } from '../components/ui';
 
 const FOLDERS: [string, string, string][] = [
   ['downloads', 'Downloads', 'Where browsers save files by default.'],
@@ -14,17 +14,6 @@ const FOLDERS: [string, string, string][] = [
   ['documents', 'Documents', 'Your Documents folder.'],
   ['removable', 'Removable drives', 'USB drives and similar, while they are connected.'],
 ];
-
-function Tile({ label, value, tone, hint }: { label: string; value: string | number; tone?: 'ok' | 'warn' | 'danger'; hint?: string }) {
-  const c = tone === 'danger' ? 'text-danger' : tone === 'warn' ? 'text-warn' : tone === 'ok' ? 'text-ok' : 'text-ink';
-  return (
-    <Card className="p-4">
-      <div className={`text-2xl font-semibold tabular-nums tracking-tight ${c}`}>{value}</div>
-      <div className="mt-1 text-sm text-ink">{label}</div>
-      {hint && <div className="mt-0.5 text-xs text-muted">{hint}</div>}
-    </Card>
-  );
-}
 
 export function Protection() {
   const { status, refresh, toast, go } = useApp();
@@ -89,8 +78,8 @@ export function Protection() {
   const running = !!h?.monitorRunning;
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="Real-Time Protection" subtitle="What SENTRIX is watching right now, what it could not check, and what it may do on its own. Scanning, warning and blocking are different things, so each is described separately." />
+    <div className="space-y-4">
+      <PageHeader title="Real-Time Protection" subtitle="What is being watched, what could not be checked, and what SENTRIX may do on its own." />
 
       {managed && (
         <Notice tone="info" title={`These settings are managed by ${status.managedBy}`}>
@@ -114,24 +103,33 @@ export function Protection() {
           )}
           {h.queue.stuck > 0 && <Notice tone="danger" title={`${h.queue.stuck} scan(s) appear to be stuck`}>They are recovered automatically, but if this keeps happening restart SENTRIX.</Notice>}
 
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <Tile label="Real-time monitoring" value={!rtOn ? 'Off' : running ? 'On' : 'Not working'} tone={!rtOn ? undefined : running ? 'ok' : 'danger'} hint={running ? `Last file event ${agoMs(h.lastFileEventAt)}` : undefined} />
-            <Tile label="Scanner engine" value={h.engine.state === 'running' ? 'Healthy' : h.engine.state === 'degraded' ? 'Outdated' : h.engine.state === 'stopped' ? 'Stopped' : 'Unavailable'} tone={h.engine.state === 'running' ? 'ok' : h.engine.state === 'unavailable' ? 'danger' : 'warn'} hint={h.engine.clamav_version?.split('/')[0]} />
-            <Tile label="Waiting to be scanned" value={h.queue.queued + h.queue.scanning} tone={h.queue.queued > 50 ? 'warn' : undefined} hint={h.queue.oldestQueuedSeconds != null ? `Oldest waiting ${h.queue.oldestQueuedSeconds}s` : 'Nothing waiting'} />
-            <Tile label="Could not be checked" value={h.queue.failed} tone={h.queue.failed > 0 ? 'danger' : undefined} hint="Never counted as safe" />
-            <Tile label="Files checked on this device" value={h.queue.filesScanned.toLocaleString()} hint={`Last successful scan ${agoMs(h.queue.lastScanAt)}`} />
-            <Tile label="Results no longer current" value={h.queue.staleResults} tone={h.queue.staleResults > 0 ? 'warn' : undefined} hint="File changed after it was scanned" />
-            <Tile label="Notifications waiting" value={h.outbox.pending} tone={h.outbox.pending > 0 ? 'warn' : undefined} hint={h.outbox.failed24h ? `${h.outbox.failed24h} failed in 24 h` : undefined} />
-            <Tile label="Folder check" value={agoMs(h.lastReconcileAt)} hint="Catches files that arrived while SENTRIX was closed" />
-          </div>
+          <Section title="Status">
+            <div className="grid md:grid-cols-2 md:divide-x md:divide-line">
+              <Rows>
+                <Row label="Real-time monitoring" tone={!rtOn ? 'muted' : running ? 'ok' : 'danger'}>{!rtOn ? 'Off' : running ? `On (last file event ${agoMs(h.lastFileEventAt)})` : 'Not working'}</Row>
+                <Row label="Scanner engine" tone={h.engine.state === 'running' ? 'ok' : h.engine.state === 'unavailable' ? 'danger' : 'warn'}>
+                  {h.engine.state === 'running' ? 'Healthy' : h.engine.state === 'degraded' ? 'Signatures outdated' : h.engine.state === 'stopped' ? 'Stopped' : 'Unavailable'}
+                </Row>
+                <Row label="Waiting to be scanned">{h.queue.queued + h.queue.scanning}{h.queue.oldestQueuedSeconds != null ? ` (oldest ${h.queue.oldestQueuedSeconds} s)` : ''}</Row>
+                <Row label="Could not be checked" tone={h.queue.failed ? 'danger' : undefined}>{h.queue.failed}</Row>
+              </Rows>
+              <Rows>
+                <Row label="Files checked on this device">{h.queue.filesScanned.toLocaleString()}</Row>
+                <Row label="Last successful scan">{agoMs(h.queue.lastScanAt)}</Row>
+                <Row label="Results no longer current" tone={h.queue.staleResults ? 'warn' : undefined}>{h.queue.staleResults}</Row>
+                <Row label="Notifications waiting" tone={h.outbox.pending ? 'warn' : undefined}>{h.outbox.pending}{h.outbox.failed24h ? ` (${h.outbox.failed24h} failed in 24 h)` : ''}</Row>
+                <Row label="Last folder check">{agoMs(h.lastReconcileAt)}</Row>
+              </Rows>
+            </div>
+          </Section>
         </>
       )}
 
-      <Card className="p-6">
+      <Card className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-base font-semibold text-ink">Real-time protection</h2>
-            <p className="mt-1 text-sm text-muted">Scans new files in the folders below shortly after they finish downloading. It scans after a file arrives: it does not stop a download or a program from running.</p>
+            <h2 className="text-sm font-semibold text-ink">Real-time protection</h2>
+            
           </div>
           <Pill tone={!rtOn ? 'muted' : running ? 'ok' : 'danger'}>{!rtOn ? 'Off' : running ? 'Active' : 'Problem'}</Pill>
         </div>
@@ -141,7 +139,7 @@ export function Protection() {
         <fieldset className="mt-4 grid gap-3 sm:grid-cols-2" disabled={!rtOn || lock}>
           <legend className="sr-only">Folders to watch</legend>
           {FOLDERS.map(([k, label, desc]) => (
-            <label key={k} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition ${s.monitoredFolders.includes(k) ? 'border-accent/50 bg-accent/5' : 'border-line'} ${!rtOn ? 'opacity-50' : ''}`}>
+            <label key={k} className={`flex cursor-pointer items-start gap-3 rounded border p-3 transition ${s.monitoredFolders.includes(k) ? 'border-accent/50 bg-accent/5' : 'border-line'} ${!rtOn ? 'opacity-50' : ''}`}>
               <input type="checkbox" className="mt-1 size-4 accent-[var(--accent)]" checked={s.monitoredFolders.includes(k)} onChange={() => toggleFolder(k)} />
               <span>
                 <span className="block text-sm font-medium text-ink">{label}</span>
@@ -152,7 +150,7 @@ export function Protection() {
         </fieldset>
         <div className="mt-4">
           {s.customFolders.map((f) => (
-            <div key={f} className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-line px-3 py-2 text-sm">
+            <div key={f} className="mb-2 flex items-center justify-between gap-3 rounded border border-line px-3 py-2 text-sm">
               <span className="truncate font-mono text-xs text-ink">{f}</span>
               <button aria-label={`Stop watching ${f}`} className="rounded-lg p-1.5 text-muted hover:bg-surface2 hover:text-danger" disabled={managed} onClick={() => save({ customFolders: s.customFolders.filter((x) => x !== f) })}>
                 <Trash2 className="size-4" />
@@ -168,7 +166,7 @@ export function Protection() {
 
       <Card className="overflow-hidden">
         <div className="border-b border-line px-6 py-4">
-          <h2 className="text-base font-semibold text-ink">Watched folders</h2>
+          <h2 className="text-sm font-semibold text-ink">Watched folders</h2>
           <p className="mt-0.5 text-sm text-muted">The real state of each folder, not just what is selected.</p>
         </div>
         {!h ? (
@@ -194,7 +192,7 @@ export function Protection() {
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <div>
-            <h2 className="text-base font-semibold text-ink">Files that could not be checked</h2>
+            <h2 className="text-sm font-semibold text-ink">Files that could not be checked</h2>
             <p className="mt-0.5 text-sm text-muted">SENTRIX tried several times. These are <strong className="text-ink">not</strong> known to be safe.</p>
           </div>
           {!!h?.couldNotCheck.length && <Button onClick={() => retry()}>Try all again</Button>}
@@ -217,14 +215,14 @@ export function Protection() {
         )}
       </Card>
 
-      <Card className="p-6">
-        <h2 className="text-base font-semibold text-ink">What SENTRIX may do on its own</h2>
+      <Card className="p-5">
+        <h2 className="text-sm font-semibold text-ink">What SENTRIX may do on its own</h2>
         <div className="mt-3 space-y-2">
           {([
             ['off', 'Warn me only', 'Show a notification and let me decide. Nothing is moved or deleted automatically.'],
             ['malicious_only', 'Quarantine confirmed malware', 'Move a file to quarantine only when a malware-signature engine identifies it as malicious. Suspicious files are never touched automatically, and nothing is ever deleted without your confirmation.'],
           ] as const).map(([v, label, desc]) => (
-            <label key={v} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition ${s.autoQuarantine === v ? 'border-accent/50 bg-accent/5' : 'border-line'}`}>
+            <label key={v} className={`flex cursor-pointer items-start gap-3 rounded border p-4 transition ${s.autoQuarantine === v ? 'border-accent/50 bg-accent/5' : 'border-line'}`}>
               <input type="radio" name="aq" disabled={managed} className="mt-1 size-4 accent-[var(--accent)]" checked={s.autoQuarantine === v} onChange={() => save({ autoQuarantine: v })} />
               <span>
                 <span className="block text-sm font-medium text-ink">{label}</span>
@@ -245,15 +243,15 @@ export function Protection() {
         </div>
       </Card>
 
-      <Card className="p-6">
+      <Card className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-base font-semibold text-ink">Detection engine</h2>
+            <h2 className="text-sm font-semibold text-ink">Detection engine</h2>
             <p className="mt-1 text-sm text-muted">{eng.detail}</p>
           </div>
           <Pill tone={eng.state === 'running' ? 'ok' : eng.state === 'unavailable' ? 'danger' : 'warn'}>{eng.state}</Pill>
         </div>
-        <dl className="mt-4 grid max-w-xl grid-cols-2 gap-y-2 text-sm">
+        <dl className="mt-4 grid max-w-xl grid-cols-[12rem_1fr] gap-y-2 text-sm">
           <dt className="text-muted">Malware engine</dt>
           <dd className="text-ink">{eng.clamav_version ?? (eng.clamav_installed ? 'Installed, not running' : 'Not installed')}</dd>
           <dt className="text-muted">Signature age</dt>
@@ -272,7 +270,7 @@ export function Protection() {
 
       <Card className="overflow-hidden">
         <div className="border-b border-line px-6 py-4">
-          <h2 className="text-base font-semibold text-ink">Recent protection events</h2>
+          <h2 className="text-sm font-semibold text-ink">Recent protection events</h2>
         </div>
         {!h?.recentEvents.length ? (
           <div className="px-6 py-5 text-sm text-muted">No events yet.</div>
@@ -289,8 +287,8 @@ export function Protection() {
         )}
       </Card>
 
-      <Card className="p-6">
-        <h2 className="text-base font-semibold text-ink">Limits of this build</h2>
+      <Card className="p-5">
+        <h2 className="text-sm font-semibold text-ink">Limits of this build</h2>
         <ul className="mt-3 list-disc space-y-1.5 pl-5 text-sm text-muted">
           <li>SENTRIX scans a file after it appears. It cannot intercept a download, and it cannot stop a program you start unless the execution guard has marked that file.</li>
           <li>No scanner detects everything. A clean result is not a guarantee.</li>

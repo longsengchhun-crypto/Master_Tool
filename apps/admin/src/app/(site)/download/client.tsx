@@ -43,13 +43,13 @@ export default function DownloadClient({ releases }: { releases: PublicRelease[]
     <div className="mt-10">
       <div role="radiogroup" aria-label="Choose your operating system" className="mb-6 flex flex-wrap gap-2">
         {OPTIONS.map((o) => (
-          <button key={o.id} role="radio" aria-checked={platform === o.id} onClick={() => setPlatform(o.id)} className={`rounded-full border px-4 py-2 text-sm transition ${platform === o.id ? 'border-accent/60 bg-accent/10 text-ink' : 'border-line text-muted hover:text-ink'}`}>
+          <button key={o.id} role="radio" aria-checked={platform === o.id} onClick={() => setPlatform(o.id)} className={`rounded border px-3 py-1.5 text-sm transition-colors ${platform === o.id ? 'border-accent bg-infobg font-semibold text-ink' : 'border-line bg-solid text-muted hover:text-ink'}`}>
             {o.label}
           </button>
         ))}
       </div>
 
-      <div className="glass rounded-3xl p-8">
+      <div className="panel rounded-lg p-8">
         {!rel ? (
           <div>
             <h2 className="text-xl font-semibold text-ink">{opt.label}</h2>
@@ -64,16 +64,16 @@ export default function DownloadClient({ releases }: { releases: PublicRelease[]
                 <h2 className="text-xl font-semibold text-ink">SENTRIX {rel.version} for {opt.label}</h2>
                 <p className="mt-1 text-sm text-muted">{mb(rel.sizeBytes)} · released {rel.publishedAt ? new Date(rel.publishedAt).toLocaleDateString(undefined, { dateStyle: 'long' }) : 'date not recorded'}</p>
               </div>
-              <a href={rel.url} rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-accent to-accent2 px-6 py-3 text-sm font-medium text-accentink shadow-lg shadow-accent/20 hover:brightness-110">
+              <a href={rel.url} rel="noopener noreferrer" className="inline-flex h-9 items-center gap-2 rounded bg-accent px-4 text-sm font-semibold text-accentink hover:bg-accenthover">
                 <Download className="size-4" /> Download installer
               </a>
             </div>
 
             {rel.codeSigned ? (
-              <p className="mt-5 rounded-xl bg-okbg px-4 py-3 text-sm text-ok">This installer is code-signed. Windows shows the publisher name when you run it.</p>
+              <p className="mt-5 rounded border-l-[3px] border-ok bg-okbg px-4 py-2.5 text-sm text-ink">This installer is code-signed. Windows shows the publisher name when you run it.</p>
             ) : (
-              <p className="mt-5 flex gap-2 rounded-xl bg-warnbg px-4 py-3 text-sm text-warn">
-                <ShieldAlert className="mt-0.5 size-4 shrink-0" />
+              <p className="mt-5 flex gap-2 rounded border-l-[3px] border-warn bg-warnbg px-4 py-2.5 text-sm text-ink">
+                <ShieldAlert className="mt-0.5 size-4 shrink-0 text-warn" />
                 <span><strong>This build is not code-signed.</strong> Windows SmartScreen will warn that the publisher is unknown. Only continue if you downloaded it from this page, and verify the checksum below.</span>
               </p>
             )}

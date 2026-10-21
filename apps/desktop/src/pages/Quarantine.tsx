@@ -81,7 +81,7 @@ export function Quarantine() {
           <Empty icon={<ShieldCheck className="size-6" />} title="Quarantine is empty">Files you quarantine appear here. Nothing is moved automatically unless you turn that on under Protection.</Empty>
         ) : (
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-line text-xs uppercase tracking-wide text-muted">
+            <thead className="border-b border-line text-xs font-semibold text-muted">
               <tr>
                 <th className="px-5 py-3 font-medium">File</th>
                 <th className="px-3 py-3 font-medium">Verdict</th>
@@ -152,7 +152,7 @@ export function Quarantine() {
                 </Notice>
                 <label className="block text-sm">
                   Type <span className="font-mono font-semibold text-ink">RESTORE</span> to confirm
-                  <input value={typed} onChange={(e) => setTyped(e.target.value)} className="mt-1 w-full rounded-xl border border-line bg-solid px-3 py-2 font-mono text-ink" autoComplete="off" spellCheck={false} />
+                  <input value={typed} onChange={(e) => setTyped(e.target.value)} className="mt-1 w-full rounded border border-line bg-solid px-3 py-2 font-mono text-ink" autoComplete="off" spellCheck={false} />
                 </label>
               </>
             ) : (

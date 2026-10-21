@@ -13,13 +13,13 @@ export default async function Page() {
   }
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
-      <h1 className="text-4xl font-semibold tracking-tight text-ink">Release notes</h1>
+      <h1 className="text-3xl font-semibold text-ink">Release notes</h1>
       {rows.length === 0 ? (
         <p className="mt-6 text-muted">No releases have been published yet.</p>
       ) : (
         <ul className="mt-10 space-y-8">
           {rows.map((r) => (
-            <li key={`${r.version}-${r.platform}`} className="glass rounded-2xl p-6">
+            <li key={`${r.version}-${r.platform}`} className="panel rounded-lg p-5">
               <div className="flex items-baseline justify-between"><h2 className="text-lg font-semibold text-ink">{r.version} <span className="text-sm font-normal text-muted">{r.platform}</span></h2><span className="text-sm text-muted">{r.published_at ? new Date(r.published_at).toLocaleDateString(undefined, { dateStyle: 'long' }) : ''}</span></div>
               <p className="mt-3 whitespace-pre-line text-sm text-muted">{r.notes || 'No notes provided.'}</p>
             </li>

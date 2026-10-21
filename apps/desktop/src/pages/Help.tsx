@@ -4,8 +4,8 @@ import { Card, PageHeader } from '../components/ui';
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <Card className="px-6 py-5">
-      <h2 className="text-base font-semibold text-ink">{title}</h2>
+    <Card className="px-5 py-4">
+      <h2 className="text-sm font-semibold text-ink">{title}</h2>
       <div className="mt-2 space-y-2 text-sm text-muted">{children}</div>
     </Card>
   );

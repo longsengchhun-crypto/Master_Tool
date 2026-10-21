@@ -72,7 +72,7 @@ export default function Organizations() {
         {code && (
           <div className="space-y-3">
             <p>One-time code for <span className="font-medium text-ink">{code.org}</span>. Valid for 24 hours and works once. It is shown only now.</p>
-            <div className="select-all rounded-xl border border-line bg-surface2 p-4 text-center font-mono text-lg tracking-widest text-ink">{code.code}</div>
+            <div className="select-all rounded border border-line bg-surface2 p-4 text-center font-mono text-lg tracking-widest text-ink">{code.code}</div>
             <p>In SENTRIX on the device: Account and License, then Enroll this device. Enrolling uses one license seat.</p>
           </div>
         )}

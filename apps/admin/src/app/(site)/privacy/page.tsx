@@ -5,8 +5,8 @@ export const metadata: Metadata = { title: 'Privacy policy' };
 export default function Privacy() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
-      <div className="mb-8 rounded-xl bg-warnbg px-4 py-3 text-sm text-warn">Draft for legal review. This describes what the software actually does today; it has not been reviewed by counsel and must be before public launch.</div>
-      <h1 className="text-4xl font-semibold tracking-tight text-ink">Privacy policy</h1>
+      <div className="mb-8 rounded bg-warnbg px-4 py-3 text-sm text-warn">Draft for legal review. This describes what the software actually does today; it has not been reviewed by counsel and must be before public launch.</div>
+      <h1 className="text-3xl font-semibold text-ink">Privacy policy</h1>
       <div className="mt-8 space-y-8 text-muted [&_h2]:mb-2 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-ink [&_li]:mt-1.5 [&_ul]:list-disc [&_ul]:pl-6">
         <section>
           <h2>The short version</h2>

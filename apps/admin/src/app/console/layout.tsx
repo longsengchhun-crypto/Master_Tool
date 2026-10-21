@@ -13,10 +13,10 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   const me = { email: p.email, name: p.name, role: p.role, csrf: p.csrf };
   return (
     <ConsoleProvider me={me}>
-      <div className="ambient flex min-h-screen">
+      <div className="flex min-h-screen">
         <Nav role={p.role} email={p.email} />
-        <main className="min-w-0 flex-1 px-8 py-8">
-          <div className="mx-auto max-w-[1200px]">{children}</div>
+        <main className="min-w-0 flex-1 px-8 py-6">
+          <div className="mx-auto max-w-[1160px]">{children}</div>
         </main>
       </div>
     </ConsoleProvider>

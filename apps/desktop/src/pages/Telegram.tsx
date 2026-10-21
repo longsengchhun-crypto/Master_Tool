@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Bot, Eye, EyeOff, FolderOpen, Send, Unplug } from 'lucide-react';
+import { Eye, EyeOff, FolderOpen, Send, Unplug } from 'lucide-react';
 import { api, errText } from '../lib/api';
 import { useApp } from '../lib/app';
 import { agoMs, whenMs } from '../lib/format';
@@ -82,10 +82,10 @@ export function Telegram() {
 
       {!t.allowed && <Notice tone="info" title="Turned off by your organization">Your organization does not allow Telegram notifications on this device. Nothing on this page will connect.</Notice>}
 
-      <Card className="p-6">
+      <Card className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="flex items-center gap-2 text-base font-semibold text-ink"><Bot className="size-5 text-accent" /> Your personal bot</h2>
+            <h2 className="text-sm font-semibold text-ink">Your personal bot</h2>
             <p className="mt-1 text-sm text-muted">Reports are sent from a bot that <strong className="text-ink">you</strong> create with Telegram's @BotFather, to a chat that only you can read. SENTRIX does not operate any shared bot and has no access to yours.</p>
           </div>
           <Pill tone={bot.connected ? (bot.lastTestOk === false ? 'warn' : 'ok') : 'muted'}>{bot.connected ? (bot.lastTestOk === false ? 'Problem' : 'Connected') : bot.configured ? 'Not verified' : 'Not connected'}</Pill>
@@ -93,7 +93,7 @@ export function Telegram() {
 
         {bot.configured ? (
           <div className="mt-4 space-y-4">
-            <dl className="grid max-w-xl grid-cols-2 gap-y-2 text-sm">
+            <dl className="grid max-w-xl grid-cols-[12rem_1fr] gap-y-2 text-sm">
               <dt className="text-muted">Bot</dt>
               <dd className="text-ink">{bot.username ? `@${bot.username}` : 'Unknown'}</dd>
               <dt className="text-muted">Chat</dt>
@@ -138,7 +138,7 @@ export function Telegram() {
                   spellCheck={false}
                   placeholder="123456789:AA…"
                   disabled={!t.allowed}
-                  className="w-full rounded-xl border border-line bg-solid px-3 py-2 font-mono text-sm text-ink"
+                  className="w-full rounded border border-line bg-solid px-3 py-2 font-mono text-sm text-ink"
                 />
                 <Button aria-label={show ? 'Hide token' : 'Show token'} onClick={() => setShow((v) => !v)}>{show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</Button>
               </div>
@@ -148,7 +148,7 @@ export function Telegram() {
               <Button busy={busy === 'detect'} disabled={!tokenLooksRight || !t.allowed} onClick={detect}>Find my chat</Button>
               <label className="block text-sm">
                 <span className="font-medium text-ink">Chat ID</span>
-                <input inputMode="numeric" value={chat} onChange={(e) => setChat(e.target.value.replace(/[^\d-]/g, ''))} placeholder="Found automatically" disabled={!t.allowed} className="mt-2 block w-48 rounded-xl border border-line bg-solid px-3 py-2 font-mono text-sm text-ink" />
+                <input inputMode="numeric" value={chat} onChange={(e) => setChat(e.target.value.replace(/[^\d-]/g, ''))} placeholder="Found automatically" disabled={!t.allowed} className="mt-2 block w-48 rounded border border-line bg-solid px-3 py-2 font-mono text-sm text-ink" />
               </label>
               <Button variant="primary" busy={busy === 'connect'} disabled={!tokenLooksRight || !Number(chat) || !t.allowed} onClick={connect}>Connect and send test</Button>
             </div>
@@ -167,8 +167,8 @@ export function Telegram() {
 
       {bot.configured && (
         <>
-          <Card className="px-6 py-4">
-            <h2 className="text-base font-semibold text-ink">What to send me</h2>
+          <Card className="px-5 py-3">
+            <h2 className="text-sm font-semibold text-ink">What to send me</h2>
             <p className="mt-1 text-sm text-muted">Reports contain the file name, verdict, source and checks completed. File contents are never sent.</p>
             <div className="mt-2 divide-y divide-line">
               {PREFS.map(([k, label, desc]) => (
@@ -177,8 +177,8 @@ export function Telegram() {
             </div>
           </Card>
 
-          <Card className="px-6 py-4">
-            <h2 className="text-base font-semibold text-ink">Scan files I send to the bot</h2>
+          <Card className="px-5 py-3">
+            <h2 className="text-sm font-semibold text-ink">Scan files I send to the bot</h2>
             <div className="divide-y divide-line">
               <Toggle
                 checked={t.acceptSubmissions}
@@ -193,10 +193,10 @@ export function Telegram() {
         </>
       )}
 
-      <Card className="p-6">
-        <h2 className="text-base font-semibold text-ink">Telegram Desktop downloads</h2>
+      <Card className="p-5">
+        <h2 className="text-sm font-semibold text-ink">Telegram Desktop downloads</h2>
         <p className="mt-1 text-sm text-muted">Files Telegram Desktop saves to your computer are scanned like any other download, and labelled “Telegram Desktop” in your history and reports. This works without a bot and without signing in to anything.</p>
-        <dl className="mt-4 grid max-w-xl grid-cols-2 gap-y-2 text-sm">
+        <dl className="mt-4 grid max-w-xl grid-cols-[12rem_1fr] gap-y-2 text-sm">
           <dt className="text-muted">Telegram Desktop</dt>
           <dd className="text-ink">{d.detection.installed ? 'Found on this computer' : 'Not found'}</dd>
           <dt className="text-muted">Watched folder</dt>
@@ -211,7 +211,7 @@ export function Telegram() {
           <div className="mt-4 space-y-2">
             <div className="text-sm font-medium text-ink">Possible Telegram folders</div>
             {d.detection.candidates.map((c) => (
-              <div key={c.path} className="flex items-center justify-between gap-3 rounded-xl border border-line px-3 py-2">
+              <div key={c.path} className="flex items-center justify-between gap-3 rounded border border-line px-3 py-2">
                 <div className="min-w-0">
                   <div className="truncate font-mono text-xs text-ink" title={c.path}>{c.path}</div>
                   <div className="text-xs text-muted">{c.exists ? `${c.fileCount} file(s)` : 'Does not exist yet'}</div>
@@ -229,10 +229,10 @@ export function Telegram() {
         <p className="mt-3 text-xs text-muted">Covers files that Telegram Desktop saved to disk. Media you have only viewed, or have not downloaded, is not on disk and is not scanned.</p>
       </Card>
 
-      <Card className="p-6">
+      <Card className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-base font-semibold text-ink">Telegram account monitoring</h2>
+            <h2 className="text-sm font-semibold text-ink">Telegram account monitoring</h2>
             <p className="mt-1 text-sm text-muted">Scanning attachments in your personal chats, groups and channels directly from your account.</p>
           </div>
           <Pill tone="muted">Not available in this build</Pill>
@@ -247,7 +247,7 @@ export function Telegram() {
 
       <Card className="overflow-hidden">
         <div className="border-b border-line px-6 py-4">
-          <h2 className="text-base font-semibold text-ink">Recent notifications</h2>
+          <h2 className="text-sm font-semibold text-ink">Recent notifications</h2>
           <p className="mt-0.5 text-sm text-muted">Messages SENTRIX queued for your bot. Delivery state comes from Telegram's response.</p>
         </div>
         {!t.recentNotifications.length ? (

@@ -1,39 +1,23 @@
 import { useEffect, useState } from 'react';
-import { usePolled } from '../lib/hooks';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Archive, ArrowRight, Check, FileSearch, HardDrive, Radar, RefreshCw, ShieldAlert, ShieldCheck, ShieldQuestion, X } from 'lucide-react';
+import { ArrowRight, FileSearch, HardDrive, RefreshCw } from 'lucide-react';
 import { useApp } from '../lib/app';
 import { api, errText } from '../lib/api';
 import { ago, agoMs, splitPath } from '../lib/format';
+import { usePolled } from '../lib/hooks';
 import type { ScanReport } from '../lib/types';
-import { Button, Card, Empty, Notice, Pill, VerdictBadge } from '../components/ui';
+import { Button, Card, Empty, Notice, Row, Rows, Section, VerdictBadge } from '../components/ui';
 
-const LEVEL = {
-  protected: { icon: ShieldCheck, ring: 'from-ok/70 to-accent/60', text: 'text-ok', bg: 'bg-okbg' },
-  attention: { icon: ShieldQuestion, ring: 'from-warn/80 to-warn/30', text: 'text-warn', bg: 'bg-warnbg' },
-  at_risk: { icon: ShieldAlert, ring: 'from-danger/80 to-danger/30', text: 'text-danger', bg: 'bg-dangerbg' },
-} as const;
+const EDGE = { protected: 'border-l-ok', attention: 'border-l-warn', at_risk: 'border-l-danger' } as const;
+const DOT = { protected: 'bg-ok', attention: 'bg-warn', at_risk: 'bg-danger' } as const;
 
-function Stat({ label, value, tone, onClick }: { label: string; value: number | string; tone?: 'danger' | 'warn'; onClick?: () => void }) {
+function Count({ label, value, tone, onClick }: { label: string; value: number; tone?: 'danger' | 'warn'; onClick: () => void }) {
+  const c = value > 0 && tone === 'danger' ? 'text-danger' : value > 0 && tone === 'warn' ? 'text-warn' : 'text-ink';
   return (
-    <button onClick={onClick} className="glass rounded-2xl p-4 text-left transition hover:border-strong">
-      <div className={`text-3xl font-semibold tabular-nums tracking-tight ${tone === 'danger' && Number(value) > 0 ? 'text-danger' : tone === 'warn' && Number(value) > 0 ? 'text-warn' : 'text-ink'}`}>{value}</div>
-      <div className="mt-1 text-sm text-muted">{label}</div>
+    <button onClick={onClick} className="px-4 py-3 text-left transition-colors hover:bg-surface2">
+      <div className={`text-2xl font-semibold tabular-nums ${c}`}>{value}</div>
+      <div className="text-xs text-muted">{label}</div>
     </button>
-  );
-}
-
-function Capability({ ok, label, detail, offLabel = 'Not available in this build' }: { ok: boolean; label: string; detail: string; offLabel?: string }) {
-  return (
-    <li className="flex items-start gap-3 py-2.5">
-      <span className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-full ${ok ? 'bg-okbg text-ok' : 'bg-surface2 text-faint'}`}>{ok ? <Check className="size-3.5" /> : <X className="size-3.5" />}</span>
-      <div>
-        <div className="text-sm font-medium text-ink">
-          {label} <span className="font-normal text-muted">· {ok ? 'Available' : offLabel}</span>
-        </div>
-        <div className="text-xs text-muted">{detail}</div>
-      </div>
-    </li>
   );
 }
 
@@ -46,9 +30,10 @@ export function Home() {
   if (!status) {
     return statusError ? <Notice tone="danger" title="SENTRIX could not read its status">{statusError}</Notice> : <div className="text-muted">Loading…</div>;
   }
-  const L = LEVEL[status.protection.level];
-  const Icon = L.icon;
+  const lvl = status.protection.level;
   const eng = status.engine;
+  const h = health.data;
+  const t = tg.data;
 
   const pickFiles = async () => {
     const sel = await open({ multiple: true, title: 'Choose files to scan' });
@@ -68,153 +53,109 @@ export function Home() {
     }
   };
 
+  const botState = !t ? '…' : !t.bot.configured ? 'Not connected' : t.bot.lastTestOk === false ? 'Last test failed' : t.bot.connected ? `Connected${t.bot.username ? ` as @${t.bot.username}` : ''}` : 'Not verified';
+
   return (
-    <div className="space-y-6">
-      <Card className="rise relative overflow-hidden p-8">
-        <div className="pointer-events-none absolute -right-24 -top-24 size-80 rounded-full opacity-40 blur-3xl" style={{ background: `radial-gradient(closest-side, var(--glow), transparent)` }} />
-        <div className="relative flex flex-wrap items-center gap-8">
-          <div className={`relative grid size-28 shrink-0 place-items-center rounded-full bg-gradient-to-br ${L.ring} p-[3px]`}>
-            <div className="grid size-full place-items-center rounded-full bg-elev">
-              <Icon className={`size-12 ${L.text}`} strokeWidth={1.6} aria-hidden />
+    <div className="space-y-4">
+      <Card className={`border-l-4 px-5 py-4 ${EDGE[lvl]}`}>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className={`size-2.5 rounded-full ${DOT[lvl]}`} aria-hidden />
+              <h1 className="text-lg font-semibold text-ink">{status.protection.headline}</h1>
             </div>
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className={`text-sm font-medium ${L.text}`}>{status.protection.level === 'protected' ? 'All systems operating' : status.protection.level === 'attention' ? 'Action recommended' : 'Immediate attention'}</div>
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight text-ink">{status.protection.headline}</h1>
             {status.protection.reasons.length > 0 ? (
-              <ul className="mt-3 space-y-1 text-sm text-muted">
+              <ul className="mt-1.5 space-y-0.5 text-sm text-muted">
                 {status.protection.reasons.map((r, i) => (
-                  <li key={i}>• {r}</li>
+                  <li key={i}>{r}</li>
                 ))}
               </ul>
             ) : (
-              <p className="mt-3 text-sm text-muted">Detection engine is running with current signatures and new downloads are being scanned. No scanner finds everything, so stay cautious with files from unknown sources.</p>
+              <p className="mt-1 text-sm text-muted">The engine is running with current signatures. No scanner finds everything, so stay careful with files from unknown sources.</p>
             )}
-            <div className="mt-6 flex flex-wrap gap-3">
-              <Button variant="primary" className="px-6 py-3 text-base" onClick={pickFiles} disabled={scan.running}>
-                <FileSearch className="size-5" /> Scan a File
-              </Button>
-              <Button className="px-6 py-3 text-base" onClick={requestFullScan} disabled={scan.running}>
-                <HardDrive className="size-5" /> Full System Scan
-              </Button>
-              {(eng.state === 'unavailable' || eng.state === 'degraded' || !status.lastSignatureUpdate) && (
-                <Button busy={updating} onClick={update} className="px-6 py-3 text-base">
-                  <RefreshCw className="size-5" /> Update protection
-                </Button>
-              )}
-            </div>
           </div>
-        </div>
-      </Card>
-
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat label="Malicious files found" value={status.stats.maliciousFiles} tone="danger" onClick={() => go('history')} />
-        <Stat label="Suspicious files" value={status.stats.suspiciousFiles} tone="warn" onClick={() => go('history')} />
-        <Stat label="In quarantine" value={status.stats.quarantined} onClick={() => go('quarantine')} />
-        <Stat label="Scans run" value={status.stats.scansTotal} onClick={() => go('history')} />
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-ink">Detection engine</h2>
-            <Pill tone={eng.state === 'running' ? 'ok' : eng.state === 'unavailable' ? 'danger' : 'warn'}>{eng.state === 'running' ? 'Running' : eng.state === 'degraded' ? 'Signatures outdated' : eng.state === 'stopped' ? 'Stopped' : 'Unavailable'}</Pill>
-          </div>
-          <p className="text-sm text-muted">{eng.detail}</p>
-          <dl className="mt-4 grid grid-cols-2 gap-y-2 text-sm">
-            <dt className="text-muted">Engine</dt>
-            <dd className="text-right text-ink">{eng.clamav_version ? eng.clamav_version.split('/')[0] : 'Not running'}</dd>
-            <dt className="text-muted">Signature database</dt>
-            <dd className="text-right text-ink">{eng.clamav_version ? `v${eng.clamav_version.split('/')[1] ?? '?'}` : eng.clamav_database_present ? 'Installed' : 'Missing'}</dd>
-            <dt className="text-muted">Last protection update</dt>
-            <dd className="text-right text-ink">{ago(status.lastSignatureUpdate)}</dd>
-            <dt className="text-muted">Last full scan</dt>
-            <dd className="text-right text-ink">{ago(status.lastFullScan)}</dd>
-          </dl>
-          <div className="mt-4">
-            <Button busy={updating} onClick={update}>
-              <RefreshCw className="size-4" /> Check for protection updates
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" onClick={pickFiles} disabled={scan.running}>
+              <FileSearch className="size-4" /> Scan files…
             </Button>
+            <Button onClick={requestFullScan} disabled={scan.running}>
+              <HardDrive className="size-4" /> Full system scan
+            </Button>
+            {(eng.state === 'unavailable' || eng.state === 'degraded' || !status.lastSignatureUpdate) && (
+              <Button busy={updating} onClick={update}>
+                <RefreshCw className="size-4" /> Update protection
+              </Button>
+            )}
           </div>
-        </Card>
+        </div>
+      </Card>
 
-        <Card className="p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-ink">What SENTRIX does on this device</h2>
-            <button className="text-sm text-accent hover:underline" onClick={() => go('protection')}>
-              Manage <ArrowRight className="inline size-3.5" />
-            </button>
-          </div>
-          <ul className="divide-y divide-line">
-            <Capability ok={status.capabilities.fileScanning} label="Scans files you choose" detail="Signatures, structure and heuristic checks, run locally." />
-            <Capability ok={status.capabilities.folderMonitoring && status.realtime.state === 'active'} label="Scans new downloads" offLabel={status.capabilities.folderMonitoring ? 'Currently off' : 'Not available on this platform'} detail={status.realtime.state === 'active' ? `Watching ${status.realtime.watching.length} folder(s).` : 'Real-time protection is off or not running.'} />
-            <Capability ok={status.capabilities.fileScanning} label="Warns and quarantines" detail="You decide what happens unless you enable automatic quarantine." />
-            <Capability ok={status.capabilities.executionGuard && status.settings.executionGuard} label="Blocks confirmed-malicious files from launching" offLabel={status.capabilities.executionGuard ? 'Turned off' : 'Not available'} detail="A reversible Windows permission on files a malware engine confirmed. SENTRIX has no kernel driver, so it cannot stop other programs or a download." />
-          </ul>
-        </Card>
-      </div>
+      <Card className="grid grid-cols-2 divide-x divide-line overflow-hidden sm:grid-cols-4">
+        <Count label="Malicious files found" value={status.stats.maliciousFiles} tone="danger" onClick={() => go('history')} />
+        <Count label="Suspicious files" value={status.stats.suspiciousFiles} tone="warn" onClick={() => go('history')} />
+        <Count label="In quarantine" value={status.stats.quarantined} onClick={() => go('quarantine')} />
+        <Count label="Scans run" value={status.stats.scansTotal} onClick={() => go('history')} />
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-ink">Automatic scanning</h2>
-            <button className="text-sm text-accent hover:underline" onClick={() => go('protection')}>
-              Details <ArrowRight className="inline size-3.5" />
-            </button>
-          </div>
-          {health.data ? (
-            <dl className="grid grid-cols-2 gap-y-2 text-sm">
-              <dt className="text-muted">Monitoring</dt>
-              <dd className={`text-right ${!health.data.realtimeEnabled ? 'text-muted' : health.data.monitorRunning ? 'text-ok' : 'text-danger'}`}>{!health.data.realtimeEnabled ? 'Off' : health.data.monitorRunning ? 'Active' : 'Not working'}</dd>
-              <dt className="text-muted">Waiting to be scanned</dt>
-              <dd className="text-right text-ink">{health.data.queue.queued + health.data.queue.scanning}</dd>
-              <dt className="text-muted">Could not be checked</dt>
-              <dd className={`text-right ${health.data.queue.failed ? 'text-danger' : 'text-ink'}`}>{health.data.queue.failed}</dd>
-              <dt className="text-muted">Results no longer current</dt>
-              <dd className={`text-right ${health.data.queue.staleResults ? 'text-warn' : 'text-ink'}`}>{health.data.queue.staleResults}</dd>
-              <dt className="text-muted">Last automatic scan</dt>
-              <dd className="text-right text-ink">{agoMs(health.data.queue.lastScanAt)}</dd>
-            </dl>
-          ) : (
-            <p className="text-sm text-muted">{health.error ?? 'Loading…'}</p>
-          )}
-        </Card>
+        <Section title="Detection engine" aside={<Button variant="ghost" className="-mr-2 h-7" busy={updating} onClick={update}>Check for updates</Button>}>
+          <Rows>
+            <Row label="State" tone={eng.state === 'running' ? 'ok' : eng.state === 'unavailable' ? 'danger' : 'warn'}>
+              {eng.state === 'running' ? 'Running' : eng.state === 'degraded' ? 'Signatures outdated' : eng.state === 'stopped' ? 'Stopped' : 'Unavailable'}
+            </Row>
+            <Row label="Engine">{eng.clamav_version ? eng.clamav_version.split('/')[0] : 'Not running'}</Row>
+            <Row label="Signature database">{eng.clamav_version ? `v${eng.clamav_version.split('/')[1] ?? '?'}` : eng.clamav_database_present ? 'Installed' : 'Missing'}</Row>
+            <Row label="Last signature update">{ago(status.lastSignatureUpdate)}</Row>
+            <Row label="Last full scan">{ago(status.lastFullScan)}</Row>
+          </Rows>
+        </Section>
 
-        <Card className="p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-ink">Telegram</h2>
-            <button className="text-sm text-accent hover:underline" onClick={() => go('telegram')}>
-              Manage <ArrowRight className="inline size-3.5" />
-            </button>
-          </div>
-          {tg.data ? (
-            <dl className="grid grid-cols-2 gap-y-2 text-sm">
-              <dt className="text-muted">Your bot</dt>
-              <dd className={`text-right ${tg.data.bot.connected && tg.data.bot.lastTestOk !== false ? 'text-ok' : tg.data.bot.configured ? 'text-warn' : 'text-muted'}`}>{!tg.data.bot.configured ? 'Not connected' : tg.data.bot.lastTestOk === false ? 'Last test failed' : tg.data.bot.connected ? `Connected${tg.data.bot.username ? ` (@${tg.data.bot.username})` : ''}` : 'Not verified'}</dd>
-              <dt className="text-muted">Reports waiting / failed (24 h)</dt>
-              <dd className="text-right text-ink">{tg.data.bot.pending} / {tg.data.bot.failed24h}</dd>
-              <dt className="text-muted">Last report delivered</dt>
-              <dd className="text-right text-ink">{tg.data.bot.lastDeliveryAt ? agoMs(tg.data.bot.lastDeliveryAt) : 'None yet'}</dd>
-              <dt className="text-muted">Telegram Desktop folder</dt>
-              <dd className="text-right text-ink">{tg.data.desktop.watching ? 'Watching' : tg.data.desktop.folder ? 'Not watching' : 'Not set up'}</dd>
-              <dt className="text-muted">Account monitoring</dt>
-              <dd className="text-right text-muted">Not available in this build</dd>
-            </dl>
+        <Section title="Automatic scanning" aside={<Button variant="ghost" className="-mr-2 h-7" onClick={() => go('protection')}>Details <ArrowRight className="size-3.5" /></Button>}>
+          {h ? (
+            <Rows>
+              <Row label="Folder monitoring" tone={!h.realtimeEnabled ? 'muted' : h.monitorRunning ? 'ok' : 'danger'}>
+                {!h.realtimeEnabled ? 'Off' : h.monitorRunning ? `Watching ${h.roots.filter((r) => r.watching).length} folder(s)` : 'Not working'}
+              </Row>
+              <Row label="Waiting to be scanned">{h.queue.queued + h.queue.scanning}</Row>
+              <Row label="Could not be checked" tone={h.queue.failed ? 'danger' : undefined}>{h.queue.failed}</Row>
+              <Row label="Results no longer current" tone={h.queue.staleResults ? 'warn' : undefined}>{h.queue.staleResults}</Row>
+              <Row label="Last automatic scan">{agoMs(h.queue.lastScanAt)}</Row>
+            </Rows>
           ) : (
-            <p className="text-sm text-muted">{tg.error ?? 'Loading…'}</p>
+            <p className="px-4 py-3 text-sm text-muted">{health.error ?? 'Loading…'}</p>
           )}
-        </Card>
+        </Section>
+
+        <Section title="Telegram" aside={<Button variant="ghost" className="-mr-2 h-7" onClick={() => go('telegram')}>Manage <ArrowRight className="size-3.5" /></Button>}>
+          {t ? (
+            <Rows>
+              <Row label="Your bot" tone={t.bot.connected && t.bot.lastTestOk !== false ? 'ok' : t.bot.configured ? 'warn' : 'muted'}>{botState}</Row>
+              <Row label="Reports waiting / failed in 24 h">{t.bot.pending} / {t.bot.failed24h}</Row>
+              <Row label="Last report delivered">{t.bot.lastDeliveryAt ? agoMs(t.bot.lastDeliveryAt) : 'None yet'}</Row>
+              <Row label="Telegram Desktop folder">{t.desktop.watching ? 'Watching' : t.desktop.folder ? 'Not watching' : 'Not set up'}</Row>
+              <Row label="Account monitoring" tone="muted">Not available in this build</Row>
+            </Rows>
+          ) : (
+            <p className="px-4 py-3 text-sm text-muted">{tg.error ?? 'Loading…'}</p>
+          )}
+        </Section>
+
+        <Section title="What SENTRIX does here">
+          <Rows>
+            <Row label="Scans files you choose" tone={status.capabilities.fileScanning ? 'ok' : 'muted'}>{status.capabilities.fileScanning ? 'Yes' : 'No'}</Row>
+            <Row label="Scans new downloads" tone={status.capabilities.folderMonitoring && status.realtime.state === 'active' ? 'ok' : 'muted'}>
+              {status.realtime.state === 'active' ? 'Yes' : status.capabilities.folderMonitoring ? 'Off' : 'Not on this platform'}
+            </Row>
+            <Row label="Quarantines on its own" tone="muted">{status.settings.autoQuarantine === 'malicious_only' ? 'Confirmed malware only' : 'No, you decide'}</Row>
+            <Row label="Blocks confirmed malware from launching" tone={status.settings.executionGuard ? 'ok' : 'muted'}>{status.settings.executionGuard ? 'On' : 'Off'}</Row>
+            <Row label="Stops downloads or other programs" tone="muted">Not possible without a driver</Row>
+          </Rows>
+        </Section>
       </div>
 
-      <Card className="p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink">Recent activity</h2>
-          <button className="text-sm text-accent hover:underline" onClick={() => go('history')}>
-            View history <ArrowRight className="inline size-3.5" />
-          </button>
-        </div>
+      <Section title="Recent scans" aside={<Button variant="ghost" className="-mr-2 h-7" onClick={() => go('history')}>All history <ArrowRight className="size-3.5" /></Button>}>
         <RecentList onOpen={openReport} />
-      </Card>
+      </Section>
     </div>
   );
 }
@@ -225,23 +166,23 @@ function RecentList({ onOpen }: { onOpen: (id: string) => void }) {
   useEffect(() => {
     void api.history(6).then(setRows);
   }, [status?.stats.scansTotal]);
-  if (rows === null) return <div className="py-6 text-sm text-muted">Loading…</div>;
-  if (!rows.length) return <Empty icon={<Radar className="size-6" />} title="No scans yet">Scan a file or drop one onto this window to see results here.</Empty>;
+  if (rows === null) return <div className="px-4 py-4 text-sm text-muted">Loading…</div>;
+  if (!rows.length) return <Empty title="No scans yet">Scan a file, or drop one on this window, and the result appears here.</Empty>;
   return (
-    <ul className="divide-y divide-line">
-      {rows.map((r) => (
-        <li key={r.id}>
-          <button onClick={() => onOpen(r.id)} className="flex w-full items-center gap-4 py-3 text-left hover:bg-surface2/60">
-            <Archive className="size-5 shrink-0 text-faint" aria-hidden />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium text-ink">{r.file.name}</div>
+    <table className="w-full text-left text-sm">
+      <tbody className="divide-y divide-line">
+        {rows.map((r) => (
+          <tr key={r.id} onClick={() => onOpen(r.id)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onOpen(r.id)} className="cursor-pointer hover:bg-surface2">
+            <td className="max-w-[320px] px-4 py-2">
+              <div className="truncate font-semibold text-ink">{r.file.name}</div>
               <div className="truncate text-xs text-muted">{splitPath(r.file.path)[0]}</div>
-            </div>
-            <VerdictBadge verdict={r.verdict} incomplete={!r.complete} />
-            <span className="w-20 text-right text-xs text-muted">{ago(r.finished_at)}</span>
-          </button>
-        </li>
-      ))}
-    </ul>
+            </td>
+            <td className="px-3 py-2 text-xs text-muted">{r.origin ?? 'Manual scan'}</td>
+            <td className="px-3 py-2"><VerdictBadge verdict={r.verdict} incomplete={!r.complete} /></td>
+            <td className="w-24 px-4 py-2 text-right text-xs text-muted">{ago(r.finished_at)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

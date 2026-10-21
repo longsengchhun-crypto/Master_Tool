@@ -13,10 +13,10 @@ const VERDICTS = [
 export default function Docs() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
-      <h1 className="text-4xl font-semibold tracking-tight text-ink">Documentation</h1>
+      <h1 className="text-3xl font-semibold text-ink">Documentation</h1>
 
       <section className="mt-10 space-y-3">
-        <h2 className="text-2xl font-semibold text-ink">Getting started</h2>
+        <h2 className="text-lg font-semibold text-ink">Getting started</h2>
         <ol className="list-decimal space-y-2 pl-6 text-muted">
           <li>Download and run the installer from the <a className="text-accent hover:underline" href="/download">download page</a>. Check the SHA-256 checksum shown there.</li>
           <li>On first launch, SENTRIX explains what it can and cannot do, then downloads malware signatures (about 300 MB once).</li>
@@ -26,8 +26,8 @@ export default function Docs() {
       </section>
 
       <section className="mt-12 space-y-3">
-        <h2 className="text-2xl font-semibold text-ink">What the verdicts mean</h2>
-        <dl className="divide-y divide-line rounded-2xl border border-line">
+        <h2 className="text-lg font-semibold text-ink">What the verdicts mean</h2>
+        <dl className="divide-y divide-line rounded-lg border border-line">
           {VERDICTS.map(([k, v]) => (
             <div key={k} className="grid gap-1 px-5 py-4 sm:grid-cols-[10rem_1fr]">
               <dt className="font-medium text-ink">{k}</dt>
@@ -39,7 +39,7 @@ export default function Docs() {
       </section>
 
       <section className="mt-12 space-y-3">
-        <h2 className="text-2xl font-semibold text-ink">Scanning, warning and blocking are different</h2>
+        <h2 className="text-lg font-semibold text-ink">Scanning, warning and blocking are different</h2>
         <ul className="list-disc space-y-2 pl-6 text-muted">
           <li><strong className="text-ink">Scanning</strong> — SENTRIX reads a file and reports findings. Implemented.</li>
           <li><strong className="text-ink">Warning</strong> — SENTRIX notifies you and offers safe actions (quarantine, open the folder without running the file). Implemented.</li>
@@ -48,8 +48,8 @@ export default function Docs() {
       </section>
 
       <section className="mt-12 space-y-3">
-        <h2 className="text-2xl font-semibold text-ink">Supported platforms</h2>
-        <div className="overflow-x-auto rounded-2xl border border-line">
+        <h2 className="text-lg font-semibold text-ink">Supported platforms</h2>
+        <div className="overflow-x-auto rounded-lg border border-line">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-line text-xs uppercase tracking-wide text-muted"><tr><th className="px-4 py-3">Platform</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Notes</th></tr></thead>
             <tbody className="divide-y divide-line text-muted">
@@ -62,7 +62,7 @@ export default function Docs() {
       </section>
 
       <section className="mt-12 space-y-3">
-        <h2 className="text-2xl font-semibold text-ink">Known limitations</h2>
+        <h2 className="text-lg font-semibold text-ink">Known limitations</h2>
         <ul className="list-disc space-y-2 pl-6 text-muted">
           <li>No scanner detects everything. Expect false negatives and occasional false positives.</li>
           <li>Real-time protection scans a file after it lands on disk; it does not hook browsers or mail clients.</li>

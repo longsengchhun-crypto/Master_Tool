@@ -20,7 +20,7 @@ async function load(): Promise<PublicRelease[]> {
 export default async function Page() {
   return (
     <main className="mx-auto max-w-4xl px-6 py-16">
-      <h1 className="text-4xl font-semibold tracking-tight text-ink">Download SENTRIX</h1>
+      <h1 className="text-3xl font-semibold text-ink">Download SENTRIX</h1>
       <p className="mt-3 max-w-2xl text-muted">Windows 10 and 11 (64-bit) is the supported platform today. macOS and Linux builds are planned, not available.</p>
       <DownloadClient releases={await load()} />
     </main>

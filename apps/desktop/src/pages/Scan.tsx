@@ -31,10 +31,10 @@ export function Scan() {
 
   return (
     <div>
-      <PageHeader title="Scan" subtitle="Drop files here or choose them below. Files are inspected in place and never executed. Nothing is uploaded." />
+      <PageHeader title="Scan" subtitle="Files are inspected where they are and never run. Nothing is uploaded." />
 
       {engineDown && (
-        <div className="mb-5">
+        <div className="mb-4">
           <Notice tone="warn" title="No malware-signature engine is available">
             Scans can still inspect file structure, but no file can be declared clean until the engine is set up. Open Protection to install signatures.
           </Notice>
@@ -42,13 +42,11 @@ export function Scan() {
       )}
 
       {!scan.running && (
-        <Card className="rise mb-6 grid place-items-center border-dashed p-12 text-center" aria-label="Drop zone">
-          <div className="mb-4 grid size-16 place-items-center rounded-2xl bg-gradient-to-br from-accent/20 to-accent2/20 text-accent">
-            <UploadCloud className="size-8" strokeWidth={1.6} />
-          </div>
-          <h2 className="text-lg font-semibold text-ink">Drop files or folders anywhere in this window</h2>
-          <p className="mt-1 max-w-md text-sm text-muted">Executables, scripts, documents, PDFs and archives (ZIP, JAR, APK, Office) are all supported. File type is detected from content, not from the name.</p>
-          <div className="mt-6 flex flex-wrap justify-center gap-3">
+        <Card className="mb-5 grid place-items-center border-dashed border-strong px-8 py-10 text-center" aria-label="Drop zone">
+          <UploadCloud className="mb-3 size-7 text-faint" strokeWidth={1.5} aria-hidden />
+          <h2 className="text-sm font-semibold text-ink">Drop files or folders anywhere in this window</h2>
+          <p className="mt-1 max-w-md text-sm text-muted">The file type comes from the content, not the name. Archives (ZIP, JAR, APK, Office) are opened in memory, never extracted to disk.</p>
+          <div className="mt-5 flex flex-wrap justify-center gap-2">
             <Button variant="primary" onClick={chooseFiles}>
               <FilePlus2 className="size-4" /> Choose files
             </Button>
@@ -61,10 +59,10 @@ export function Scan() {
       )}
 
       {scan.running && (
-        <Card className="mb-6 p-6" role="status" aria-live="polite">
+        <Card className="mb-5 p-5" role="status" aria-live="polite">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <h2 className="text-base font-semibold text-ink">{scan.kind === 'full' ? 'Scanning all fixed drives…' : 'Scanning…'}</h2>
+              <h2 className="text-sm font-semibold text-ink">{scan.kind === 'full' ? 'Scanning all fixed drives…' : 'Scanning…'}</h2>
               <p className="mt-1 max-w-xl truncate text-sm text-muted" title={p?.current}>
                 {p ? p.current : 'Collecting files…'}
               </p>
@@ -81,10 +79,8 @@ export function Scan() {
               {cancelling ? 'Cancelling…' : 'Cancel'}
             </Button>
           </div>
-          <div className="mt-5 h-2 overflow-hidden rounded-full bg-surface2">
-            <div className="relative h-full overflow-hidden rounded-full bg-gradient-to-r from-accent to-accent2 transition-all" style={{ width: known ? `${Math.max(pct, 2)}%` : '100%', opacity: known ? 1 : 0.55 }}>
-              <div className="absolute inset-y-0 w-1/3 bg-white/40 blur-md" style={{ animation: 'sweep 1.6s linear infinite' }} />
-            </div>
+          <div className="mt-4 h-1 overflow-hidden rounded-full bg-surface2">
+            <div className={`h-full rounded-full bg-accent transition-all ${known ? '' : 'animate-pulse'}`} style={{ width: known ? `${Math.max(pct, 2)}%` : '100%', opacity: known ? 1 : 0.5 }} />
           </div>
           <div className="mt-2 flex justify-between text-xs text-muted tabular-nums">
             <span>
@@ -104,9 +100,9 @@ export function Scan() {
       )}
 
       {result && !scan.running && (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
           <Card className="overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
               <h2 className="text-sm font-semibold text-ink">Results · {result.counts.total.toLocaleString()} file{result.counts.total === 1 ? '' : 's'} scanned</h2>
               <span className="text-xs text-muted">{result.cancelled ? 'Cancelled' : result.complete ? 'Scan complete' : 'Scan incomplete'}</span>
             </div>
@@ -166,7 +162,7 @@ export function Scan() {
               </details>
             )}
           </Card>
-          <Card className="p-6">
+          <Card className="p-5">
             {selected ? (
               <ReportView
                 key={selected.id}
