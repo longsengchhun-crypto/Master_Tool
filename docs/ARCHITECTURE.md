@@ -125,4 +125,4 @@ One design language across the desktop app, console and site (`index.css` / `glo
 * Flat surfaces with hairline borders, 4 px controls and 8 px panels; no gradients, glow, blur or entrance animations.
 * Information is shown as label/value rows and tables (`Section`, `Rows`, `Row` in each `ui.tsx`), not grids of stat cards.
 * Status colour never appears without text: a state is always written out.
-* Brand: flat geometric "S" on a navy tile (`apps/desktop/brand/*.svg`; `npm run icons -w @sentrix/desktop` regenerates the PNG/ICO/ICNS).
+* Brand: the SENTRIX shield-S mark (`apps/desktop/brand/*.svg`, unchanged by the redesign; `npm run icons -w @sentrix/desktop` regenerates the PNG/ICO/ICNS).
