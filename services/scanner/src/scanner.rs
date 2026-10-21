@@ -322,7 +322,7 @@ impl Scanner {
         if kind.zip_family() {
             if let Some(b) = &body {
                 if let Ok(z) = zip::ZipArchive::new(Cursor::new(b.as_slice())) {
-                    let names: Vec<String> = z.file_names().map(|s| s.to_string()).collect();
+                    let names: Vec<String> = z.file_names().map(|s| s.map(|c| c.into_owned()).unwrap_or_else(|_| "<undecodable name>".to_string())).collect();
                     kind = identify::refine_zip(&names);
                 }
             }
@@ -858,7 +858,7 @@ mod tests {
 fn ooxml_macro_findings(zip_bytes: &[u8]) -> Vec<Finding> {
     let Ok(mut z) = zip::ZipArchive::new(Cursor::new(zip_bytes)) else { return Vec::new() };
     let mut out = Vec::new();
-    let names: Vec<String> = z.file_names().map(|s| s.to_string()).collect();
+    let names: Vec<String> = z.file_names().map(|s| s.map(|c| c.into_owned()).unwrap_or_else(|_| "<undecodable name>".to_string())).collect();
     if names.iter().any(|n| n.to_ascii_lowercase().ends_with("vbaproject.bin")) {
         out.push(Finding::new("heuristic.document", "Contains VBA macros", FindingKind::Heuristic, Severity::Low, "Macros can run code when enabled. Their behaviour was not analysed."));
     }

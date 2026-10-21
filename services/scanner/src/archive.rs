@@ -49,7 +49,7 @@ fn walk(data: &[u8], limits: &Limits, depth: u32, prefix: &str, out: &mut Vec<Fi
             return (FileKind::Zip, true);
         }
     };
-    let names: Vec<String> = zip.file_names().map(|s| s.to_string()).collect();
+    let names: Vec<String> = zip.file_names().map(|s| s.map(|c| c.into_owned()).unwrap_or_else(|_| "<undecodable name>".to_string())).collect();
     let refined = identify::refine_zip(&names);
 
     if zip.len() > limits.archive_max_entries {
@@ -62,7 +62,7 @@ fn walk(data: &[u8], limits: &Limits, depth: u32, prefix: &str, out: &mut Vec<Fi
         }
         b.entries += 1;
         let (name, size, csize, encrypted, is_dir) = match zip.by_index_raw(i) {
-            Ok(f) => (f.name().to_string(), f.size(), f.compressed_size(), f.encrypted(), f.is_dir()),
+            Ok(f) => (f.name().map(|c| c.into_owned()).unwrap_or_else(|_| "<undecodable name>".to_string()), f.size(), f.compressed_size(), f.encrypted(), f.is_dir()),
             Err(_) => continue,
         };
         if is_dir {

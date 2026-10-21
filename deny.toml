@@ -5,6 +5,11 @@ targets = ["x86_64-pc-windows-msvc"]
 [advisories]
 version = 2
 yanked = "deny"
+# zip 4.6.1 comes in through tauri-plugin-updater. The three advisories are about ZipArchive::extract() on Unix
+# (symlink targets, SUID bits). SENTRIX ships a Windows NSIS installer as the update artifact, so the updater never
+# extracts a zip, and the artifact's minisign signature is verified before anything is read. Revisit when the
+# updater plugin moves to zip >= 9.
+ignore = ["RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369"]
 
 [licenses]
 version = 2

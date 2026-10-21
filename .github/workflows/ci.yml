@@ -16,6 +16,11 @@ jobs:
         run: |
           npm ci
           npm run build -w @sentrix/desktop
+      - name: Placeholder for the bundled engine (the installer build stages the real one; tests do not need it)
+        shell: bash
+        run: |
+          mkdir -p apps/desktop/src-tauri/engine-staging/clamav
+          echo "CI placeholder" > apps/desktop/src-tauri/engine-staging/clamav/README.txt
       - run: cargo test --workspace --locked
       # Real-ClamAV engine tests need the ClamAV runtime + signature DB; run them in the release pipeline, not here.
 

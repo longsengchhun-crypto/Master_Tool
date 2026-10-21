@@ -1,0 +1,4 @@
+# See the matching comment in deny.toml: zip 4.6.1 via tauri-plugin-updater, extract() advisories, not reachable
+# (Windows NSIS updater artifact, signature verified first).
+[advisories]
+ignore = ["RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369"]

@@ -1,0 +1,12 @@
+[extend]
+useDefault = true
+
+# Test fixtures only: obviously fake, non-functional bot tokens used to prove that token-shaped strings are redacted
+# or rejected. Real secrets must never be added here.
+[[allowlists]]
+description = "fake Telegram token fixtures in tests"
+paths = [
+  '''services/scanner/src/telegram\.rs''',
+  '''services/scanner/tests/.*''',
+  '''apps/admin/tests/security\.test\.ts''',
+]
