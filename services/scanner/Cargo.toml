@@ -23,7 +23,7 @@ hex = "0.4"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-goblin = "0.9"
+goblin = "0.10"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 cfb = "0.10"
 notify = "8"
