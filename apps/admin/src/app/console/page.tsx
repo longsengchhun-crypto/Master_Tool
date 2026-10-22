@@ -63,6 +63,11 @@ export default function Overview() {
             <Rows>
               <Metric label="Bots connected" value={f.telegram_bots_connected} hint="Counts only: never tokens or chats" />
               <Metric label="Devices with delivery failures (24 h)" value={f.telegram_delivery_failures} tone="warn" hint="Devices with undelivered reports" />
+              <Metric label="Accounts connected" value={f.tg_accounts_connected} hint="Personal Telegram accounts being checked on a device. Counts only" />
+              <Metric label="Account sessions ended" value={f.tg_accounts_expired} tone="warn" hint="Telegram ended the session: files are not being checked until the user signs in again" />
+              <Metric label="Account files checked" value={f.tg_account_checked} hint="Since set up on each device" />
+              <Metric label="Account threats found" value={f.tg_account_threats} tone="danger" />
+              <Metric label="Account files not checked" value={f.tg_account_unverified} tone="warn" hint="Too large, protected or could not be downloaded" />
               <Metric label="Groups registered" value={f.tg_groups_registered} hint="Counts only: never group names or members" />
               <Metric label="Groups protected" value={f.tg_groups_protected} hint="An administrator of the group turned protection on" />
               <Metric label="Groups with automatic deletion" value={f.tg_groups_auto_delete} />

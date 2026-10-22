@@ -71,6 +71,10 @@ export const HeartbeatRequest = z.strictObject({
       botConnected: z.boolean(),
       deliveryFailures24h: z.number().int().min(0),
       accountState: z.enum(['not_available', 'disconnected', 'connected', 'expired']),
+      // Personal-account protection, counts since it was set up. Never account names, phone numbers, chat names or files.
+      account: z
+        .strictObject({ scanned: z.number().int().min(0), threats: z.number().int().min(0), unverified: z.number().int().min(0) })
+        .optional(),
     })
     .optional(),
 });

@@ -1,50 +1,19 @@
-//! Telegram ACCOUNT-level attachment monitoring: the part that can be built and verified safely.
+//! Pieces shared by the personal-account protection: the DPAPI-protected key vault, the attachment gate in front of the
+//! scanner, and the report for files that could not be checked. The Telegram client itself is in `account_td.rs`.
 //!
-//! STATUS: the MTProto transport (logging in as the user and receiving updates) is **NOT IMPLEMENTED**, deliberately.
-//! See docs/PHASE2_GAP_ANALYSIS.md: no vetted/audited Rust MTProto client was available, Telegram places accounts using
-//! unofficial clients under observation, and a live login could not be verified here (no test account / api_id).
-//! Shipping an unaudited stack that holds a user's full account session without being able to test it would be unsafe.
-//!
-//! What IS here and tested:
-//!  * `SessionVault`: a session blob is only ever stored DPAPI-protected, and is wiped (overwritten, then deleted) on
-//!    disconnect. It is never logged and never leaves the device.
-//!  * `AttachmentGate`: how an eventual transport must hand attachments over: no message text anywhere in the data
-//!    model, per-category opt-in, size cap, bounded concurrency/backpressure, isolated temp storage that is always
-//!    removed, results go through the same scan/notify pipeline as everything else.
-//!  * `AccountTransport`: the trait a vetted transport will implement; `NotAvailable` is the only implementation and
-//!    reports exactly why.
+//!  * `SessionVault`: the key that encrypts the TDLib database is only ever stored DPAPI-protected, and is wiped
+//!    (overwritten, then deleted) on disconnect. It is never logged and never leaves the device.
+//!  * `AttachmentGate`: no message text anywhere in the data model, per-category opt-in, size cap, bounded concurrency,
+//!    isolated temp storage that is always removed, results go through the same scan/notify pipeline as everything else.
+//!  * `unverified_report`: what the user sees for an attachment that was NOT checked. It is UNABLE TO VERIFY, never clean.
 
 use crate::secret;
 use crate::service::ProtectionService;
-use crate::types::ScanReport;
-use serde::Serialize;
+use crate::types::{Check, CheckStatus, FileInfo, ScanReport, Verdict};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case", tag = "state", content = "detail")]
-pub enum AccountState {
-    /// No transport exists in this build. `detail` says why, for the UI.
-    NotAvailable(String),
-    Disconnected,
-    Connected(String),
-    Expired,
-}
-
-pub trait AccountTransport: Send + Sync {
-    fn state(&self) -> AccountState;
-}
-
-pub struct NotAvailable;
-
-impl AccountTransport for NotAvailable {
-    fn state(&self) -> AccountState {
-        AccountState::NotAvailable(NOT_AVAILABLE_REASON.into())
-    }
-}
-
-pub const NOT_AVAILABLE_REASON: &str = "Account-level monitoring needs a Telegram client library that has been security-audited and a Telegram test account to verify it. Neither is available in this build, so SENTRIX does not collect any Telegram account credentials. Bot notifications and Telegram Desktop folder monitoring work without it.";
+use std::sync::RwLock;
 
 // ---- session vault -------------------------------------------------------------------------------------------
 
@@ -84,6 +53,49 @@ impl SessionVault {
     }
 }
 
+/// What a report says about where a file came from, so a notice never claims more than it knows about the chat.
+pub fn origin_for(kind: ChatKind) -> &'static str {
+    match kind {
+        ChatKind::Private => "Telegram personal chat",
+        ChatKind::Group => "Telegram group",
+        ChatKind::Channel => "Telegram channel",
+    }
+}
+
+/// A result for an attachment that was not checked (too large, protected, download failed, scanner busy). It is
+/// UNABLE TO VERIFY with the reason spelled out; nothing here can read as "safe".
+pub fn unverified_report(origin: &str, name: &str, size: u64, reason: &str) -> ScanReport {
+    let now = chrono::Utc::now();
+    let clean_name: String = name.chars().filter(|c| !c.is_control()).take(120).collect();
+    ScanReport {
+        id: uuid::Uuid::new_v4(),
+        file: FileInfo {
+            path: PathBuf::from(format!("[{origin}] {clean_name}")),
+            name: clean_name.clone(),
+            size,
+            sha256: String::new(),
+            detected_type: "unknown".into(),
+            declared_extension: Path::new(&clean_name).extension().map(|e| e.to_string_lossy().to_lowercase()),
+            type_mismatch: false,
+            signature: None,
+            modified: None,
+            source: None,
+        },
+        verdict: Verdict::UnableToVerify,
+        complete: false,
+        checks: vec![Check { id: "attachment_access".into(), name: "Attachment access".into(), status: CheckStatus::Unavailable, engine_version: None, note: Some(reason.to_string()), retryable: false }],
+        findings: vec![],
+        summary: format!("Not checked: {reason}"),
+        recommended_action: "Do not open this file until it has been checked another way.".into(),
+        started_at: now,
+        finished_at: now,
+        quarantined: false,
+        blocked: false,
+        cached: false,
+        origin: Some(origin.to_string()),
+    }
+}
+
 // ---- attachment ingestion -----------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,7 +114,7 @@ pub struct IncomingAttachment {
     pub size: u64,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccountPrefs {
     pub private_chats: bool,
     pub groups: bool,
@@ -126,26 +138,27 @@ pub enum IngestError {
 }
 
 pub struct AttachmentGate {
-    prefs: AccountPrefs,
+    prefs: RwLock<AccountPrefs>,
     in_flight: AtomicUsize,
     max_in_flight: usize,
 }
 
 impl AttachmentGate {
     pub fn new(prefs: AccountPrefs, max_in_flight: usize) -> Self {
-        AttachmentGate { prefs, in_flight: AtomicUsize::new(0), max_in_flight }
+        AttachmentGate { prefs: RwLock::new(prefs), in_flight: AtomicUsize::new(0), max_in_flight }
     }
 
     pub fn ingest(&self, svc: &ProtectionService, att: &IncomingAttachment, content: &mut dyn Read) -> Result<ScanReport, IngestError> {
+        let prefs = *self.prefs.read().unwrap();
         let allowed = match att.chat_kind {
-            ChatKind::Private => self.prefs.private_chats,
-            ChatKind::Group => self.prefs.groups,
-            ChatKind::Channel => self.prefs.channels,
+            ChatKind::Private => prefs.private_chats,
+            ChatKind::Group => prefs.groups,
+            ChatKind::Channel => prefs.channels,
         };
         if !allowed {
             return Err(IngestError::CategoryDisabled);
         }
-        if att.size > self.prefs.max_bytes {
+        if att.size > prefs.max_bytes {
             return Err(IngestError::TooLarge);
         }
         // Reserve a slot or push back.
@@ -160,9 +173,13 @@ impl AttachmentGate {
             }
         }
         let _slot = Slot(&self.in_flight);
-        let r = svc.scan_ephemeral("Telegram account", &att.display_name, content, self.prefs.max_bytes).map_err(IngestError::Scan)?;
+        let r = svc.scan_ephemeral(origin_for(att.chat_kind), &att.display_name, content, prefs.max_bytes).map_err(IngestError::Scan)?;
         svc.publish_report(&r);
         Ok(r)
+    }
+
+    pub fn set_prefs(&self, p: AccountPrefs) {
+        *self.prefs.write().unwrap() = p;
     }
 
     pub fn in_flight(&self) -> usize {
@@ -175,14 +192,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn transport_is_honestly_unavailable() {
-        match NotAvailable.state() {
-            AccountState::NotAvailable(r) => {
-                assert!(r.contains("audited"), "{r}");
-                assert!(r.contains("does not collect any Telegram account credentials"));
-            }
-            other => panic!("{other:?}"),
-        }
+    fn an_unchecked_attachment_can_never_read_as_safe() {
+        let r = unverified_report("Telegram personal chat", "inv\u{202e}oice.pdf\n", 10, "too big");
+        assert_eq!(r.verdict, Verdict::UnableToVerify);
+        assert!(!r.complete);
+        assert!(r.file.sha256.is_empty());
+        assert!(!r.file.name.contains('\n'));
+        assert!(r.summary.contains("Not checked"));
+        assert_eq!(r.checks[0].status, CheckStatus::Unavailable);
     }
 
     #[test]

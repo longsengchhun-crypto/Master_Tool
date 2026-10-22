@@ -13,7 +13,7 @@ interface Detail {
     org_id: string;
     created_at: string;
     queue?: { queued: number; failed: number; stuck: number };
-    telegram?: { botConnected: boolean; deliveryFailures24h: number; accountState: string };
+    telegram?: { botConnected: boolean; deliveryFailures24h: number; accountState: string; account?: { scanned: number; threats: number; unverified: number } };
     tg_groups?: { registered: number; protected: number; autoDelete: number; scans24h: number; threats24h: number; errors24h: number };
   };
   events: { id: string; kind: string; severity: string; detail: string | null; created_at: string }[];
@@ -113,7 +113,14 @@ export default function DevicePage({ params }: { params: Promise<{ id: string }>
             <div className="mt-2 flex flex-wrap gap-2">
               <Badge tone={d.telegram.botConnected ? 'ok' : 'muted'}>{d.telegram.botConnected ? 'Bot connected' : 'No bot'}</Badge>
               <Badge tone={d.telegram.deliveryFailures24h > 0 ? 'warn' : 'muted'}>{d.telegram.deliveryFailures24h} delivery failures (24 h)</Badge>
-              <Badge>Account monitoring: {d.telegram.accountState.replace('_', ' ')}</Badge>
+              <Badge tone={d.telegram.accountState === 'connected' ? 'ok' : d.telegram.accountState === 'expired' ? 'warn' : 'muted'}>Account monitoring: {d.telegram.accountState.replace('_', ' ')}</Badge>
+              {d.telegram.account && d.telegram.accountState === 'connected' && (
+                <>
+                  <Badge>{d.telegram.account.scanned} files checked</Badge>
+                  <Badge tone={d.telegram.account.threats > 0 ? 'danger' : 'muted'}>{d.telegram.account.threats} threats</Badge>
+                  <Badge tone={d.telegram.account.unverified > 0 ? 'warn' : 'muted'}>{d.telegram.account.unverified} not checked</Badge>
+                </>
+              )}
             </div>
           ) : (
             <div className="mt-2 text-sm text-muted">Not reported.</div>

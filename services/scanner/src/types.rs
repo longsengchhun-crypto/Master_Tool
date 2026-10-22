@@ -173,7 +173,7 @@ pub struct ScanReport {
     pub blocked: bool,
     pub cached: bool,
     /// What triggered the scan: "Telegram Desktop", "Downloads folder", "Browser download", "Custom folder",
-    /// "Removable drive", "Telegram bot submission", "Telegram account", "Manual scan". `None` for old reports.
+    /// "Removable drive", "Telegram bot submission", "Telegram personal chat" / "Telegram group" / "Telegram channel" (account protection), "Manual scan". `None` for old reports.
     #[serde(default)]
     pub origin: Option<String>,
 }

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Detection, NotifyPrefs, ProtectionHealth, TelegramStatus, AccountStatus, AppStatus, BatchOut, EngineStatus, QuarantineRecord, ScanReport, Settings, UpdateInfo, UpdateOutcome, RealtimeStatus } from './types';
+import type { AccountOptions, TgAccount, Detection, NotifyPrefs, ProtectionHealth, TelegramStatus, AccountStatus, AppStatus, BatchOut, EngineStatus, QuarantineRecord, ScanReport, Settings, UpdateInfo, UpdateOutcome, RealtimeStatus } from './types';
 
 /** Typed wrappers over the Tauri commands. Errors arrive as plain user-readable strings. */
 export const api = {
@@ -42,6 +42,10 @@ export const api = {
   tgSetDesktopFolder: (path: string | null) => invoke<TelegramStatus>('tg_set_desktop_folder', { path }),
   tgSetGroupShield: (enabled: boolean) => invoke<TelegramStatus>('tg_set_group_shield', { enabled }),
   tgGroupDisable: (id: number) => invoke<TelegramStatus>('tg_group_disable', { id }),
+  tgAccountStatus: () => invoke<TgAccount>('tg_account_status'),
+  tgAccountConnect: () => invoke<TgAccount>('tg_account_connect'),
+  tgAccountDisconnect: () => invoke<TgAccount>('tg_account_disconnect'),
+  tgAccountSetOptions: (options: AccountOptions) => invoke<TgAccount>('tg_account_set_options', { options }),
   tgGroupLeave: (id: number) => invoke<TelegramStatus>('tg_group_leave', { id }),
   checkUpdate: () => invoke<UpdateInfo>('check_update'),
   installUpdate: () => invoke<void>('install_update'),

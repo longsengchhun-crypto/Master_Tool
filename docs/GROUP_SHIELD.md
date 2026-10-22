@@ -32,6 +32,7 @@ is polled by the desktop app on the customer's computer, which also does the sca
 | `/help` | anyone | Explains what the bot does and its limits |
 | `/status` | anyone | Protection on/off, scanner ready, whether the bot can see files here, deletion on/off (and whether the bot still has the permission) |
 | `/scanstatus` | anyone | This group's scan counts: last 24 h and all time, skipped/failed, last scan |
+| `/report` | administrators | Counts-only summary for this group: last 7 days and all time, protection and deletion state. No file names, no other group's data |
 | `/setup` | administrators | Shows options and current state |
 | `/setup on`, `/setup off` | administrators | Start or stop scanning this group (off also turns deletion off) |
 | `/setup autodelete on` then `/setup autodelete confirm` | administrators | Two-step consent for automatic deletion (below) |

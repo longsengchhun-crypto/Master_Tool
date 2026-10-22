@@ -40,7 +40,8 @@
     "copyright": "Copyright (c) SENTRIX",
     "category": "Utility",
     "resources": {
-      "engine-staging/clamav/": "engine/clamav/"
+      "engine-staging/clamav/": "engine/clamav/",
+      "engine-staging/tdlib/": "engine/tdlib/"
     },
     "shortDescription": "SENTRIX - Intelligent File Security",
     "longDescription": "SENTRIX inspects files with a layered detection engine, explains the results in plain language, and keeps suspicious files in a protected quarantine.",

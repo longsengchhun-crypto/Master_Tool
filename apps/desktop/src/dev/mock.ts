@@ -5,7 +5,7 @@
  *
  *   ?mock=healthy | stopped | unavailable | managed | onboarding      &theme=light|dark
  */
-import type { AppStatus, ScanReport, Settings, QuarantineRecord, AccountStatus, Check, Finding, ProtectionHealth, TelegramStatus, NotifyPrefs } from '../lib/types';
+import type { AppStatus, ScanReport, Settings, QuarantineRecord, AccountStatus, Check, Finding, ProtectionHealth, TelegramStatus, TgAccount, NotifyPrefs } from '../lib/types';
 
 type Handlers = Record<string, (args: any) => unknown>;
 declare global {
@@ -129,6 +129,36 @@ function health(scn: string): ProtectionHealth {
   };
 }
 
+/** Dev preview only. ?acct=connected|disconnected|waiting|expired|twostep|failed|unconfigured|paused|offline */
+function tgAccount(scn: string): TgAccount {
+  const q = new URLSearchParams(location.search).get('acct') ?? (scn === 'healthy' || scn === 'managed' ? 'connected' : 'disconnected');
+  const base = { qrSvg: null, display: null, connection: 'ready' as const, lastSyncAt: null, lastScanAt: null, pending: 0, counts: { scanned: 0, threats: 0, suspicious: 0, inaccessible: 0, skipped: 0 }, recent: [], allowed: true, options: { enabled: true, privateChats: true, groups: false, channels: false, media: false } };
+  // A placeholder pattern, not a real login code.
+  let d = '';
+  for (let y = 0; y < 29; y++) for (let x = 0; x < 29; x++) if ((x * 7 + y * 13 + x * y) % 5 < 2 || (x < 8 && y < 8) || (x > 20 && y < 8) || (x < 8 && y > 20)) d += `M${x + 4},${y + 4}h1v1h-1z`;
+  const qr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 37 37"><rect width="37" height="37" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+  switch (q) {
+    case 'connected':
+    case 'paused':
+    case 'offline':
+      return { ...base, state: 'connected', display: 'Sam', connection: q === 'offline' ? 'waiting_for_network' : 'ready', lastSyncAt: min(q === 'offline' ? 34 : 1), lastScanAt: min(7), pending: 1,
+        options: { ...base.options, enabled: q !== 'paused' },
+        counts: { scanned: 23, threats: 1, suspicious: 0, inaccessible: 2, skipped: 5 },
+        recent: [
+          { at: min(7), name: 'Invoice-0921.zip', kind: 'private', verdict: 'MALICIOUS', note: 'Win.Test.EICAR_HDB-1 in a zip' },
+          { at: min(26), name: 'logo-final.pdf', kind: 'private', verdict: 'CLEAN', note: '' },
+          { at: min(61), name: 'archive-2019.rar', kind: 'private', verdict: 'UNABLE TO VERIFY', note: 'Not checked: The file is 612 MB, above the 200 MB limit, so it was not downloaded or checked.' },
+          { at: min(140), name: 'contract.docx', kind: 'private', verdict: 'CLEAN', note: '' },
+        ] };
+    case 'waiting': return { ...base, state: 'waiting_for_scan', qrSvg: qr };
+    case 'expired': return { ...base, state: 'expired' };
+    case 'twostep': return { ...base, state: 'two_step_unsupported' };
+    case 'failed': return { ...base, state: 'failed', detail: 'Telegram refused the sign-in: API_ID_INVALID' };
+    case 'unconfigured': return { ...base, state: 'unconfigured', detail: 'This copy of SENTRIX was built without Telegram API credentials, so account protection is unavailable.' };
+    default: return { ...base, state: 'disconnected' };
+  }
+}
+
 function telegram(scn: string): TelegramStatus {
   const connected = scn === 'healthy' || scn === 'stopped' || scn === 'managed';
   const bad = scn === 'stopped';
@@ -137,8 +167,7 @@ function telegram(scn: string): TelegramStatus {
     bot: { configured: connected, connected, username: connected ? 'my_sentrix_reports_bot' : null, chatHint: connected ? '•••421' : null, lastTestAt: connected ? min(30) : null, lastTestOk: connected ? !bad : null, lastTestError: bad ? 'Telegram could not be reached (network error).' : null, lastDeliveryAt: connected && !bad ? min(4) : null, lastDeliveryError: bad ? 'Telegram could not be reached (network error).' : null, pending: bad ? 3 : 0, failed24h: bad ? 5 : 0, dead: 0 },
     acceptSubmissions: scn === 'healthy', notify: NOTIFY,
     desktop: { detection: { installed: true, evidence: ['C:\Users\Sample\AppData\Roaming\Telegram Desktop'], candidates: [{ path: 'C:\Users\Sample\Downloads\Telegram Desktop', exists: true, fileCount: 18 }] }, folder: connected ? 'C:\Users\Sample\Downloads\Telegram Desktop' : null, exists: true, watching: connected && !bad, error: null, scanned: connected ? 18 : 0, threats: connected ? 1 : 0 },
-    account: { state: 'not_available', detail: 'Account-level monitoring is not implemented in this build: it needs a vetted Telegram client library and your own API credentials, and has not been security-audited or tested against a real account.' },
-    accountAllowed: false,
+    account: tgAccount(scn),
     groups: {
       shield: connected, allowed: true, privacyBlocks: scn === 'stopped',
       list: connected ? [
@@ -186,6 +215,10 @@ export function installMock() {
     tg_set_group_shield: () => telegram(scn),
     tg_group_disable: () => telegram(scn),
     tg_group_leave: () => telegram(scn),
+    tg_account_status: () => tgAccount(scn),
+    tg_account_connect: () => tgAccount(scn),
+    tg_account_disconnect: () => tgAccount(scn),
+    tg_account_set_options: () => tgAccount(scn),
     tg_detect_desktop: () => telegram(scn).desktop.detection,
     start_engine: () => status(scn).engine,
     get_settings: () => settings(),

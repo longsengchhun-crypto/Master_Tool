@@ -125,6 +125,35 @@ fn only_a_telegram_confirmed_administrator_can_change_settings() {
 }
 
 #[test]
+fn report_is_for_administrators_only_counts_only_and_never_mixes_groups() {
+    let r = rig(no_engine(), true);
+    r.mock.add_group(A, &[ADMIN_A], false, false);
+    r.mock.add_group(B, &[ADMIN_B], false, false);
+    protect(&r, A, ADMIN_A, 1);
+    let n = protect(&r, B, ADMIN_B, 50) + 10;
+    r.store.group_record_scan(B, 900, Some("uniq"), "ab", 5, "MALICIOUS", true, "scanned", None, now_ms()).unwrap();
+    let before = r.mock.texts_in(A).len();
+    // A member is refused.
+    r.mock.add_group_text(n, A, 20, MEMBER, "/report");
+    assert!(until(15, || r.mock.texts_in(A).len() > before));
+    assert!(r.mock.texts_in(A).last().unwrap().contains("Only group administrators"));
+    // An administrator of another group is refused too.
+    let mid = r.mock.texts_in(A).len();
+    r.mock.add_group_text(n + 1, A, 21, ADMIN_B, "/report");
+    assert!(until(15, || r.mock.texts_in(A).len() > mid));
+    assert!(r.mock.texts_in(A).last().unwrap().contains("Only group administrators"));
+    // This group's administrator gets this group's numbers only.
+    let last = r.mock.texts_in(A).len();
+    r.mock.add_group_text(n + 2, A, 22, ADMIN_A, "/report");
+    assert!(until(15, || r.mock.texts_in(A).len() > last));
+    let t = r.mock.texts_in(A).last().unwrap().clone();
+    assert!(t.contains("Security report") && t.contains("this group only"), "{t}");
+    assert!(t.contains("All time: 0 scanned, 0 malicious"), "group B's malicious scan must not appear in group A's report: {t}");
+    assert!(!t.contains("invoice") && !t.contains(".exe"), "counts only: no file names");
+    r.svc.stop();
+}
+
+#[test]
 fn an_anonymous_administrator_cannot_be_identified_and_changes_nothing() {
     let r = rig(no_engine(), true);
     r.mock.add_group(A, &[ADMIN_A], false, false);

@@ -313,12 +313,53 @@ export interface TelegramStatus {
   acceptSubmissions: boolean;
   notify: NotifyPrefs;
   desktop: { detection: Detection; folder: string | null; exists: boolean; watching: boolean; error: string | null; scanned: number; threats: number };
-  account: { state: 'not_available' | 'disconnected' | 'connected' | 'expired'; detail?: string };
-  accountAllowed: boolean;
+  account: TgAccount;
   groups: GroupsStatus;
   rejectedSubmissions: number;
   recentNotifications: OutboxRow[];
 }
+export type AccountLink =
+  | { state: 'unconfigured'; detail: string }
+  | { state: 'disconnected' }
+  | { state: 'starting' }
+  | { state: 'waiting_for_scan' }
+  | { state: 'two_step_unsupported' }
+  | { state: 'connected' }
+  | { state: 'expired' }
+  | { state: 'failed'; detail: string };
+
+export interface AccountOptions {
+  enabled: boolean;
+  privateChats: boolean;
+  groups: boolean;
+  channels: boolean;
+  media: boolean;
+}
+
+export interface AccountRecent {
+  at: number;
+  name: string;
+  kind: 'private' | 'group' | 'channel';
+  /** Label as the engine prints it: "CLEAN", "SUSPICIOUS", "MALICIOUS", "UNABLE TO VERIFY". */
+  verdict: string;
+  note: string;
+}
+
+/** Personal Telegram account protection. Never carries a phone number, username, id or any message text. */
+export type TgAccount = AccountLink & {
+  qrSvg: string | null;
+  display: string | null;
+  connection: 'ready' | 'connecting' | 'waiting_for_network' | 'updating' | 'unknown';
+  lastSyncAt: number | null;
+  lastScanAt: number | null;
+  pending: number;
+  counts: { scanned: number; threats: number; suspicious: number; inaccessible: number; skipped: number };
+  recent: AccountRecent[];
+  /** Organization policy. */
+  allowed: boolean;
+  options: AccountOptions;
+};
+
 export interface GroupStats {
   scans: number;
   threats: number;

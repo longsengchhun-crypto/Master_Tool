@@ -9,7 +9,7 @@ the app labels them separately. Read the **coverage** column before relying on a
 | **Files sent to your bot** | You send a file to your bot; SENTRIX scans it locally and replies | The bot above | Implemented. Same test status |
 | **Group Shield** | Scans files posted in groups the bot was added to and posts results there; optional consented deletion of malicious messages | The bot, the owner's master switch, a group administrator's `/setup on` | Implemented; tested against the test double and real ClamAV. See [GROUP_SHIELD.md](GROUP_SHIELD.md) |
 | **Telegram Desktop folder** | Files Telegram Desktop saved to disk are scanned like any download and labelled "Telegram Desktop" | Telegram Desktop installed | Implemented; tested with real ClamAV in a folder that stands in for Telegram's download folder |
-| **Account monitoring** | Scan attachments in your chats, groups and channels from your account | Official MTProto client, your own `api_id`, a login | **NOT IMPLEMENTED.** See below |
+| **Account protection** | Scan attachments that reach your Telegram account (private chats; groups, channels and media opt-in) | TDLib, an `api_id`/`api_hash` for the app, a QR approval on your phone | Implemented and unit-tested; the real library talks to Telegram, but a **full signed-in run is not yet done**. See [TELEGRAM_ACCOUNT.md](TELEGRAM_ACCOUNT.md) |
 
 SENTRIX does not claim to see every Telegram message or attachment. It cannot.
 
@@ -24,7 +24,7 @@ SENTRIX does not claim to see every Telegram message or attachment. It cannot.
   The computer must be on and SENTRIX running; updates Telegram holds while you are offline are processed on return
   (Telegram keeps them about 24 hours).
 * **Reports**: delivered when Telegram accepts them. While Telegram is unreachable they wait in a durable queue.
-* **Account monitoring**: nothing is monitored. Secret chats can never be read by any client except the device that holds
+* **Account protection**: files Telegram delivers to your account after you sign in, checked after download (never before). Secret chats can never be read by any client except the device that holds
   them, and content not delivered to your account (for example in channels you have not opened, or messages deleted
   before they arrived) is not available to any client library.
 
@@ -46,7 +46,7 @@ Telegram's error text if it failed.
 | Bot token | `%APPDATA%\app.sentrix.desktop\telegram-bot.token` | Windows DPAPI (current user). Never in settings, logs, URLs, the console, or the UI after saving |
 | Chat id, bot username | `settings.json` | Plain; the UI shows only the last 3 digits of the chat id |
 | Notification queue | `protection.db` (SQLite) | Local file. Message text may name private files: it is erased as soon as Telegram accepts the message, rows are deleted after 7 days, and everything is deleted on disconnect |
-| Telegram account session | `telegram-account.session` (framework only) | DPAPI; wiped on disconnect. **Never created in this build** |
+| Telegram account database key | `telegram-account.session` | DPAPI; wiped on disconnect. Encrypts TDLib's local database (`tg-account\db`). See TELEGRAM_ACCOUNT.md |
 
 Redaction: every error and log line passes through a redactor that removes anything shaped like a bot token, including
 the `bot<token>` part of API URLs, before it reaches a log, the UI or the console. This is unit-tested with non-ASCII text.
@@ -92,25 +92,22 @@ temporary directory, size-checked against both Telegram's declared size and the 
 messages, and stops delivery and submissions. To make the old token useless everywhere, also send `/revoke` to
 @BotFather. Deleting the SENTRIX data folder removes everything else it stored.
 
-## Account-level monitoring: why it is not implemented
+## Shared bot versus each customer's own bot
 
-A user account can only be reached through an MTProto client authorized with the user's **own** `api_id`/`api_hash` and a
-phone or QR login (<https://core.telegram.org/api/auth>). Reasons it is not built here:
+The latest product brief asks for the existing SENTRIX bot to be the default shared bot, with customer-owned bots optional.
+**That is not what this repository contains.** Phase 2 built per-customer bots: the customer creates the bot with @BotFather,
+its token is DPAPI-protected on their own PC, and one polling worker per installation handles their private chat and their
+groups. The console never sees a token or a Telegram update.
 
-1. No test Telegram account or `api_id` was available, so login, update streams and downloads could not be verified.
-   Shipping untested code that handles a user's account session would be irresponsible.
-2. The only maintained pure-Rust MTProto client considered (`grammers`) states that it has not been security-audited and
-   its repository is archived. TDLib (official) is a large native dependency with no vetted Rust binding here.
-3. Telegram states that accounts using unofficial API clients are automatically placed under observation. Users must be
-   told that; it is a real consequence.
+A shared bot would mean a hosted service that holds one token and receives every customer's group updates. Files would have to
+be downloaded and scanned by that service (so customers' files leave their PCs), reports routed per customer, and a Telegram
+account session would never be safe there. That is a separate product decision with privacy, hosting and cost consequences, so
+it has **not** been started. Until it is, the per-customer bot remains the only bot path, and it is what both Group Shield and
+personal-account reports use.
 
-What exists: a DPAPI-protected session vault, a minimal attachment-ingestion path that feeds the same scan queue (no
-field for message text exists), consent/state handling, and a transport trait, all unit-tested. What is missing: the
-transport itself. **Next steps** to finish it: choose an audited client (TDLib recommended), have each user register
-their own `api_id` at my.telegram.org, test against a dedicated test account, and add it behind
-`TelegramAccountTransport`. SENTRIX will never ask for a Telegram password, login code or two-step password inside its
-own windows; login would go through the client's QR/phone flow with the code typed into Telegram's own protocol, and
-only with explicit, separate consent.
+## Account-level protection
+
+See [TELEGRAM_ACCOUNT.md](TELEGRAM_ACCOUNT.md) for how it works, what it covers, how credentials are stored and what has and has not been tested. The earlier decision not to build it (no audited client, no test account) is superseded: TDLib is now the client, QR is the only sign-in, and cloud-password accounts are refused rather than asked for a password.
 
 ## Tests
 

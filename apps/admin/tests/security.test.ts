@@ -769,6 +769,57 @@ describe('Phase 2 health reporting and Telegram privacy', () => {
   });
 });
 
+describe('Personal Telegram account reporting, privacy and isolation', () => {
+  const hb = (over: Record<string, unknown>) => ({ ...HEARTBEAT, ...over });
+  const tg = (accountState: string, account?: Record<string, unknown>) => ({ botConnected: true, deliveryFailures24h: 0, accountState, ...(account ? { account } : {}) });
+
+  it('stores the account state and counts exactly as reported', async () => {
+    const a = { scanned: 23, threats: 1, unverified: 2 };
+    expect((await devA.client.req('/api/device/heartbeat', { bearer: devA.token, body: hb({ telegram: tg('connected', a) }) })).status).toBe(200);
+    expect((await devB.client.req('/api/device/heartbeat', { bearer: devB.token, body: hb({ telegram: tg('expired', { scanned: 5, threats: 0, unverified: 0 }) }) })).status).toBe(200);
+    const [d] = await sql('SELECT telegram FROM devices WHERE id = $1', [devA.deviceId]);
+    expect(d.telegram.accountState).toBe('connected');
+    expect(d.telegram.account).toEqual(a);
+  });
+
+  it('rejects account names, phone numbers, chat names, file names and malformed numbers', async () => {
+    const ok = { scanned: 1, threats: 0, unverified: 0 };
+    for (const account of [
+      { ...ok, phone: '+85512345678' },
+      { ...ok, username: 'sam_private' },
+      { ...ok, lastFile: 'salaries.xlsx' },
+      { ...ok, chats: ['Family'] },
+      { ...ok, scanned: -1 },
+      { ...ok, threats: 'one' },
+      { scanned: 1 },
+    ]) {
+      expect((await devA.client.req('/api/device/heartbeat', { bearer: devA.token, body: hb({ telegram: tg('connected', account) }) })).status, JSON.stringify(account)).toBe(400);
+    }
+    const [d] = await sql('SELECT telegram::text AS t FROM devices WHERE id = $1', [devA.deviceId]);
+    expect(d.t).not.toMatch(/85512345678|sam_private|salaries|Family/);
+  });
+
+  it('aggregates are tenant-scoped and a session that ended is visible to its own organization only', async () => {
+    const a = (await adminA.req('/api/admin/overview')).json.operational.fleet;
+    const b = (await adminB.req('/api/admin/overview')).json.operational.fleet;
+    expect(Number(a.tg_accounts_connected)).toBeGreaterThanOrEqual(1);
+    expect(Number(a.tg_account_checked)).toBeGreaterThanOrEqual(23);
+    expect(Number(a.tg_account_threats)).toBeGreaterThanOrEqual(1);
+    expect(Number(a.tg_accounts_expired), "A's device is connected, B's expired").toBe(0);
+    expect(Number(b.tg_accounts_connected)).toBe(0);
+    expect(Number(b.tg_accounts_expired)).toBeGreaterThanOrEqual(1);
+    expect(Number(b.tg_account_checked), "B must not see A's counts").toBeLessThan(23);
+    expect(JSON.stringify(a)).not.toMatch(/sam_private|salaries/);
+  });
+
+  it('another organization cannot read this device\'s account status', async () => {
+    expect((await adminB.req(`/api/admin/devices/${devA.deviceId}`)).status).toBe(404);
+    const own = await adminA.req(`/api/admin/devices/${devA.deviceId}`);
+    expect(own.status).toBe(200);
+    expect(own.json.device.telegram.account).toEqual({ scanned: 23, threats: 1, unverified: 2 });
+  });
+});
+
 describe('Group Shield reporting, privacy and isolation', () => {
   const hb = (over: Record<string, unknown>) => ({ ...HEARTBEAT, ...over });
   const A = { registered: 3, protected: 2, autoDelete: 1, scans24h: 40, threats24h: 2, errors24h: 1 };

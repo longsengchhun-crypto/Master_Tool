@@ -26,6 +26,12 @@ export const GET = handle(async () => {
             count(*) FILTER (WHERE status = 'enrolled' AND COALESCE((queue->>'queued')::int, 0) > 0) AS devices_with_backlog,
             count(*) FILTER (WHERE status = 'enrolled' AND telegram->>'botConnected' = 'true') AS telegram_bots_connected,
             count(*) FILTER (WHERE status = 'enrolled' AND COALESCE((telegram->>'deliveryFailures24h')::int, 0) > 0) AS telegram_delivery_failures,
+            -- Personal Telegram account protection (device-reported state and counts only)
+            count(*) FILTER (WHERE status = 'enrolled' AND telegram->>'accountState' = 'connected') AS tg_accounts_connected,
+            count(*) FILTER (WHERE status = 'enrolled' AND telegram->>'accountState' = 'expired') AS tg_accounts_expired,
+            COALESCE(sum((telegram->'account'->>'scanned')::int) FILTER (WHERE status = 'enrolled'), 0) AS tg_account_checked,
+            COALESCE(sum((telegram->'account'->>'threats')::int) FILTER (WHERE status = 'enrolled'), 0) AS tg_account_threats,
+            COALESCE(sum((telegram->'account'->>'unverified')::int) FILTER (WHERE status = 'enrolled'), 0) AS tg_account_unverified,
             -- Group Shield (device-reported counts only)
             COALESCE(sum((tg_groups->>'registered')::int) FILTER (WHERE status = 'enrolled'), 0) AS tg_groups_registered,
             COALESCE(sum((tg_groups->>'protected')::int) FILTER (WHERE status = 'enrolled'), 0) AS tg_groups_protected,

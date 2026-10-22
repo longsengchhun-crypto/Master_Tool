@@ -76,8 +76,7 @@
   are recovered; 7 attempts with backoff, then "could not be checked", never CLEAN. Queue and outbox are bounded.
 * `service.rs`: `ProtectionService` owns monitor, workers, reconciler, health watcher, outbox sender and bot poller.
   The desktop crate only supplies hooks (history, notifications, quarantine, tray).
-* `telegram.rs` / `notify.rs`: Bot API client and report formatting. `account.rs`: session vault + attachment gate for a
-  future account transport (not implemented). `guard.rs`: execution guard. `telegram_desktop.rs`: folder discovery.
+* `telegram.rs` / `notify.rs`: Bot API client and report formatting. `account.rs`: key vault, attachment gate and the UNABLE TO VERIFY report; `account_td.rs`: personal-account worker on TDLib; `tdjson.rs`: pinned-hash loader for TDLib's JSON interface. `guard.rs`: execution guard. `telegram_desktop.rs`: folder discovery.
 * Console receives only counts/booleans for queue and Telegram health, under strict schemas.
 
 ## Branding and configuration

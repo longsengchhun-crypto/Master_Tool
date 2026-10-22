@@ -5,7 +5,7 @@ import { api, errText } from '../lib/api';
 import { useApp } from '../lib/app';
 import { agoMs, ago, splitPath, whenMs } from '../lib/format';
 import { usePolled } from '../lib/hooks';
-import type { Settings } from '../lib/types';
+import type { ProtectionHealth, Settings } from '../lib/types';
 import { Button, Card, Disclosure, Notice, PageHeader, Row, Rows, Toggle } from '../components/ui';
 
 const FOLDERS: [string, string][] = [
@@ -15,9 +15,44 @@ const FOLDERS: [string, string][] = [
   ['removable', 'USB drives'],
 ];
 
+type Tone = 'ok' | 'warn' | 'danger' | undefined;
+
+/** The state of every part protection depends on, in one place. A colour appears only when that part is really in that state. */
+function HealthStrip({ status, health }: { status: NonNullable<ReturnType<typeof useApp>['status']>; health: ProtectionHealth | null }) {
+  const e = status.engine;
+  const engineWord = { running: 'Running', degraded: 'Degraded', stopped: 'Stopped', unavailable: 'Unavailable' }[e.state];
+  const engineTone: Tone = e.state === 'running' ? 'ok' : e.state === 'unavailable' ? 'danger' : 'warn';
+  const age = e.database_age_hours;
+  const sigTone: Tone = age === null ? 'danger' : age <= 48 ? 'ok' : 'warn';
+  const sigText = age === null ? 'Not installed' : age < 1 ? 'Up to date' : age <= 48 ? `${Math.floor(age)} h old` : `${Math.floor(age / 24)} d old`;
+  const q = health?.queue;
+  const items: { k: string; v: string; tone?: Tone }[] = [
+    { k: 'Scanner', v: engineWord, tone: engineTone },
+    { k: 'Definitions', v: sigText, tone: sigTone },
+    { k: 'Waiting', v: q ? String(q.queued + q.scanning) : '…', tone: q && q.failed > 0 ? 'warn' : undefined },
+    { k: 'Last scan', v: q ? agoMs(q.lastScanAt) : '…' },
+    { k: 'Threats', v: String(status.stats.maliciousFiles), tone: status.stats.maliciousFiles > 0 ? 'danger' : undefined },
+    { k: 'Quarantined', v: String(status.stats.quarantined) },
+  ];
+  const c = { ok: 'text-ok', warn: 'text-warn', danger: 'text-danger' };
+  return (
+    <Card>
+      <dl className="grid grid-cols-3 divide-x divide-line text-sm md:grid-cols-6">
+        {items.map((i) => (
+          <div key={i.k} className="px-4 py-3">
+            <dt className="text-xs text-muted">{i.k}</dt>
+            <dd className={`mt-0.5 truncate font-semibold tabular-nums ${i.tone ? c[i.tone] : 'text-ink'}`}>{i.v}</dd>
+          </div>
+        ))}
+      </dl>
+    </Card>
+  );
+}
+
 export function Protection() {
   const { status, refresh, toast, go } = useApp();
   const health = usePolled(() => api.protectionHealth(), 4000);
+  const acct = usePolled(() => api.tgAccountStatus(), 6000);
   const [saving, setSaving] = useState(false);
   const [updating, setUpdating] = useState(false);
   if (!status) return <div className="text-muted">Loading…</div>;
@@ -84,11 +119,21 @@ export function Protection() {
 
       {managed && <Notice tone="info">These settings are managed by {status.managedBy}. You can look but not change them.</Notice>}
       {rtOn && h && !running && <Notice tone="danger" title="Nothing is being watched">New files are not being scanned. {h.roots.length === 0 ? 'Pick a folder below.' : 'See the folders listed under Problems.'}</Notice>}
+      {acct.data?.state === 'expired' && (
+        <Notice tone="warn" title="Telegram account protection stopped">
+          Telegram ended the session, so files sent to your account are not being checked. <button className="font-semibold underline" onClick={() => go('telegram')}>Sign in again</button>.
+        </Notice>
+      )}
+      {acct.data?.state === 'connected' && acct.data.options.enabled && acct.data.connection === 'waiting_for_network' && (
+        <Notice tone="warn" title="Telegram account protection is offline">Files sent to you may not be checked until this computer is back online.</Notice>
+      )}
       {rtOn && h && !h.resumesAfterRestart && (
         <Notice tone="warn">
           SENTRIX only protects you while it is running. To start it with Windows, turn on <button className="font-semibold underline" onClick={() => go('settings')}>Start when I sign in</button>.
         </Notice>
       )}
+
+      <HealthStrip status={status} health={h} />
 
       <Card className="px-5 py-1">
         <Toggle checked={rtOn} disabled={lock} onChange={(v) => save({ realtimeMonitoring: v })} label="Scan new files automatically" description={stateText} />

@@ -3,7 +3,6 @@
 
 use crate::commands::{notify_local, Res, Shared};
 use crate::state::{watch_roots, AppState};
-use sentrix_core::account::{AccountState, NotAvailable, AccountTransport};
 use sentrix_core::guard;
 use sentrix_core::notify::{self, NotifyPrefs};
 use sentrix_core::queue::now_ms;
@@ -72,6 +71,11 @@ pub fn refresh_bot(st: &AppState) {
 /// (Re)apply settings to the running service. Idempotent.
 pub fn apply(app: &AppHandle, st: &Arc<AppState>) {
     refresh_bot(st);
+    // Organization policy can switch personal-account protection off: sign out and erase the session (off the UI thread).
+    if !st.store.settings.lock().unwrap().telegram.account_allowed && (st.account.is_running() || !matches!(st.account.view().link, sentrix_core::account_td::LinkState::Disconnected | sentrix_core::account_td::LinkState::Unconfigured(_))) {
+        let s2 = st.clone();
+        std::thread::spawn(move || s2.account.disconnect());
+    }
     st.service.set_config(build_config(st));
     let _ = app.emit("protection-changed", ());
 }
@@ -161,8 +165,7 @@ pub struct TelegramStatus {
     pub accept_submissions: bool,
     pub notify: NotifyPrefs,
     pub desktop: DesktopStatus,
-    pub account: AccountState,
-    pub account_allowed: bool,
+    pub account: crate::account::AccountOut,
     pub groups: GroupsStatus,
     pub rejected_submissions: u64,
     pub recent_notifications: Vec<sentrix_core::queue::OutboxRow>,
@@ -232,8 +235,7 @@ pub fn telegram_status(st: &AppState) -> TelegramStatus {
             scanned,
             threats,
         },
-        account: NotAvailable.state(),
-        account_allowed: s.telegram.account_allowed,
+        account: crate::account::account_out(st),
         groups: GroupsStatus { shield: s.telegram.group_shield && s.telegram.groups_allowed, allowed: s.telegram.groups_allowed, privacy_blocks: st.service.privacy_mode_blocks(), list: st.service.groups_view() },
         rejected_submissions: health.rejected_submissions,
         recent_notifications: st.jobs.recent_notifications(15).unwrap_or_default(),

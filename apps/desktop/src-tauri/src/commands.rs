@@ -201,7 +201,14 @@ pub async fn app_status(app: AppHandle, state: Shared<'_>) -> Res<AppStatus> {
     tauri::async_runtime::spawn_blocking(move || {
         let engine = st.scanner.engine_status();
         let realtime = realtime_status(&st);
-        let protection = compute_protection(&engine, &realtime, &st.jobs.stats(sentrix_core::queue::now_ms()).unwrap_or_default());
+        let mut protection = compute_protection(&engine, &realtime, &st.jobs.stats(sentrix_core::queue::now_ms()).unwrap_or_default());
+        if let Some(why) = crate::account::attention(&st.account.view()) {
+            if protection.level == "protected" {
+                protection.level = "attention".into();
+                protection.headline = "Protection needs attention".into();
+            }
+            protection.reasons.push(why.into());
+        }
         let c = st.store.counters.lock().unwrap().clone();
         AppStatus {
             version: app.package_info().version.to_string(),

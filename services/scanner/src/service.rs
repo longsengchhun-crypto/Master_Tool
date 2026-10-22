@@ -700,6 +700,16 @@ impl ProtectionService {
         self.inner.hooks.on_health_changed();
     }
 
+    /// An account-level notice (for example "Telegram authorization expired") through the user's own bot, if they want it.
+    pub fn notify_system(&self, kind: &'static str, detail: &str) {
+        let cfg = self.inner.cfg.read().unwrap().clone();
+        if cfg.chat_id.is_some() && self.inner.bot.read().unwrap().is_some() {
+            if let Some(o) = notify::format_system(kind, detail, &cfg.notify, now_ms()) {
+                let _ = self.inner.store.enqueue_notification(&o.dedupe_key, &o.kind, &o.text, now_ms());
+            }
+        }
+    }
+
     pub fn health(&self) -> ProtectionHealth {
         let i = &self.inner;
         let cfg = i.cfg.read().unwrap().clone();

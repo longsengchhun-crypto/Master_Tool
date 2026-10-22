@@ -67,7 +67,7 @@ export default function Home() {
           <li>It cannot stop a download or a program from starting, apart from an optional permission it can set on files a malware engine confirmed. Stopping arbitrary programs needs a signed driver, which is a separate project.</li>
           <li>It does not replace Windows Security. Keep Defender and SmartScreen on.</li>
           <li>It watches folders you choose, not every browser or mail client, and it scans after a file arrives.</li>
-          <li>It does not read your whole Telegram account. It scans files Telegram Desktop saved to disk and files you send to your own bot.</li>
+          <li>If you choose to sign in, it checks files sent to your Telegram account, after Telegram delivers them to your computer. It never reads message text, never asks for your password, and cannot see secret chats or content Telegram protects. You can also use it without signing in: it scans files Telegram Desktop saved to disk and files you send to your own bot.</li>
         </ol>
       </section>
     </main>

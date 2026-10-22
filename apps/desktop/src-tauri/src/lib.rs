@@ -1,9 +1,11 @@
+mod account;
 mod commands;
 pub mod portal;
 mod protection;
 mod state;
 mod sync;
 
+use account::*;
 use commands::*;
 use protection::*;
 use sentrix_core::clamav::ClamEngine;
@@ -44,6 +46,7 @@ pub fn run() {
             let jobs = Arc::new(JobStore::open(&data_dir.join("protection.db")).map_err(|e| format!("protection database unavailable: {e}"))?);
             let service = Arc::new(ProtectionService::new(scanner.clone(), quarantine.clone(), jobs.clone(), Arc::new(protection::AppHooks { app: handle.clone() }), sentrix_core::service::ServiceConfig::new(data_dir.join("tmp"))));
 
+            let account = account::build(&handle, &data_dir, &exe_dir, service.clone(), jobs.clone(), &settings);
             let st = Arc::new(AppState {
                 data_dir: data_dir.clone(),
                 store,
@@ -56,6 +59,7 @@ pub fn run() {
                 jobs,
                 service,
                 tg_vault: TokenVault::new(&data_dir),
+                account,
                 notified: Mutex::new(HashSet::new()),
             });
             app.manage(st.clone());
@@ -73,6 +77,10 @@ pub fn run() {
                     // Resume protection: recovers interrupted scans, reconciles files that arrived while we were off.
                     protection::apply(&h, &s);
                     s.service.start();
+                    // A Telegram account session saved by an earlier run comes back on its own (never starts a new login).
+                    if s.store.settings.lock().unwrap().telegram.account_allowed {
+                        s.account.resume();
+                    }
                     let _ = h.emit("engine-state-changed", ());
                 });
             }
@@ -151,6 +159,10 @@ pub fn run() {
             tg_detect_desktop,
             tg_set_desktop_folder,
             tg_set_group_shield,
+            tg_account_status,
+            tg_account_connect,
+            tg_account_disconnect,
+            tg_account_set_options,
             tg_group_disable,
             tg_group_leave,
             account_status,
@@ -166,6 +178,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 // Stop the detection engine and monitor cleanly on quit.
                 if let Some(st) = app.try_state::<Arc<AppState>>() {
+                    st.account.stop();
                     st.service.stop();
                     st.clam.stop();
                 }

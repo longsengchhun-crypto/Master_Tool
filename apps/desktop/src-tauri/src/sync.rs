@@ -103,6 +103,7 @@ fn heartbeat_payload(app: &AppHandle, st: &AppState) -> Value {
     let q = st.jobs.stats(now).unwrap_or_default();
     let ob = st.jobs.outbox_stats(now).unwrap_or_default();
     let gt = st.jobs.group_totals(now - 86_400_000).unwrap_or_default();
+    let acct = st.account.view();
     json!({
         // Operational counts only. No file names, hashes, chat ids, tokens or message text are ever included here.
         "queue": { "queued": q.queued, "failed": q.failed, "stuck": q.stuck },
@@ -114,7 +115,9 @@ fn heartbeat_payload(app: &AppHandle, st: &AppState) -> Value {
         "telegram": {
             "botConnected": st.tg_vault.exists() && st.store.settings.lock().unwrap().telegram.chat_id.is_some(),
             "deliveryFailures24h": ob.failed_24h,
-            "accountState": "not_available",
+            "accountState": account_state(&st.account.view().link),
+            // Counts only. Never file names, chat names, account names or ids.
+            "account": { "scanned": acct.counts.scanned, "threats": acct.counts.threats, "unverified": acct.counts.inaccessible },
         },
         "appVersion": app.package_info().version.to_string(),
         "engineVersion": e.clamav_version.as_deref().map(|v| v.split('/').next().unwrap_or(v).to_string()),
@@ -126,6 +129,17 @@ fn heartbeat_payload(app: &AppHandle, st: &AppState) -> Value {
             "detail": e.detail.chars().take(300).collect::<String>(),
         }
     })
+}
+
+/// The console's account state vocabulary (see packages/contracts). `unavailable` covers every "cannot run here" case.
+fn account_state(l: &sentrix_core::account_td::LinkState) -> &'static str {
+    use sentrix_core::account_td::LinkState::*;
+    match l {
+        Connected => "connected",
+        Expired => "expired",
+        Unconfigured(_) => "not_available",
+        _ => "disconnected",
+    }
 }
 
 fn tell(app: &AppHandle, body: &str) {

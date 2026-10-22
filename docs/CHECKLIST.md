@@ -100,7 +100,7 @@ _Nothing below is claimed without a test or a check named next to it. Results of
 | Pre-download interception / blocking arbitrary execution | **NOT IMPLEMENTED** | Needs a signed driver; documented, UI says so |
 | Defender not weakened | DONE | No exclusions, no settings touched (nothing in the code reads or writes Defender configuration) |
 | Telegram Desktop folder monitoring + source labels | DONE | Pipeline test; detection unit tests (4). Not run against a real Telegram Desktop install's live downloads |
-| Telegram **account** integration | **NOT IMPLEMENTED** | No audited MTProto client, no test account/api_id; no credential entry offered. Vault/gate/state framework tested ([TELEGRAM.md](TELEGRAM.md)) |
+| Telegram **account** integration (TDLib, QR sign-in only, no password/code field, cloud-password accounts refused) | **PARTIAL** | Implemented; scripted-TDLib unit tests; the **real TDLib DLL** loads, is hash-pinned, and the real Telegram servers answered it (invalid `api_id` rejected cleanly). **A full signed-in run (QR approval, real attachment) has NOT been done**: [TELEGRAM_ACCOUNT.md](TELEGRAM_ACCOUNT.md) |
 | Personal bot: connect, masked/never-shown token, DPAPI storage, redaction | DONE (against a test double) | `telegram` unit + integration tests. **Not tested against live Telegram: no real token was available** |
 | "Connected" shown only after Telegram confirms | DONE (against a test double) | `getMe` + delivered test message required before anything is saved |
 | Report pipeline: queue, retry, 429, dedupe, recovery, bounded, delivery failure never alters verdicts | DONE (against a test double) | `queue`, `telegram`, `service` tests; found and fixed during final review: delivered text was retained forever (now erased) and a full queue dropped reports silently (now an event) |
@@ -124,7 +124,13 @@ _Nothing below is claimed without a test or a check named next to it. Results of
 | Console: registered/protected/scans/threats/errors, no secrets or content | DONE | Migration 004 applied; strict schema; tenant-scoped tests |
 | Works without the owner's computer being on | **NO** | Runs on the owner's PC with the owner's bot. A central bot with server-side scanning is a different product |
 | Verified against **live Telegram** | **NOT TESTED** | No bot or group was available; privacy mode, `getChatMember` and `deleteMessage` behaviour is per Telegram's documentation |
-| Personal Telegram **account** monitoring | **NOT IMPLEMENTED** | Needs TDLib (or another audited MTProto client), an `api_id` and a test account; see [PHASE3_GAP_ANALYSIS.md](PHASE3_GAP_ANALYSIS.md) |
+| Personal Telegram **account** monitoring | **PARTIAL** | Built on TDLib; needs the live test run with a real `api_id` and test account before it can be called verified. Console shows state and counts only (tenant-isolation tests). Details: [TELEGRAM_ACCOUNT.md](TELEGRAM_ACCOUNT.md) |
+| Group `/report` (administrators only, counts only, per group) | DONE (test double) | `report_is_for_administrators_only…` |
+| Telegram page shows Group / Personal / Both with real status words (Protection active, Limited coverage, Permission required, Scanner unavailable, Connection expired, Disconnected…) | DONE | A status is "Protection active" only when connected, scanner running and something is watched; viewed in the dev preview for the healthy, stopped and expired scenarios |
+| **One shared SENTRIX bot for all customers** (the default in the latest brief) | **BLOCKED: product decision** | The repository has no shared bot and no server that polls Telegram. Each customer's own bot runs on their PC. A shared bot needs a hosted service that holds one token, receives every group's updates, scans files (so uploads leave customers' PCs) and routes reports per customer. That is a different architecture and privacy position; see [TELEGRAM.md](TELEGRAM.md) |
+| Licence tiers gating Telegram features | **NOT CHANGED** | Existing organization policy switches (`telegramBotAllowed`, `telegramAccountAllowed`, `telegramGroupsAllowed`) are honoured; no new plans or gates were invented |
+| Pre-download scanning of Telegram files | **NOT POSSIBLE** | Telegram gives bytes only on download; the UI and docs say so |
+| Production-grade TDLib binary | **BLOCKED** | Development copy is a third-party build; build from Telegram's source and re-pin before distribution |
 
 ## What is still missing
 
@@ -136,7 +142,7 @@ _Nothing below is claimed without a test or a check named next to it. Results of
 6. **Independent penetration test** and a code-signing/SmartScreen reputation ramp-up.
 7. **A Windows execution-prevention component** (separate driver project) if enforcement is a product requirement.
 7a. **Live Telegram verification**: connect a real bot (you create it) and run "Send a test message", a file submission and a Desktop-folder download; only a test double was available.
-7b. **Telegram account monitoring**: choose an audited client (TDLib), register an `api_id`, test with a dedicated account.
+7b. **Telegram account protection live test**: put the test account's `api_id`/`api_hash` in `.sentrix-dev/telegram-api.env`, run the `live_` test (QR scan, send a file, disconnect), then build TDLib from source and re-pin it.
 7c. **Windows service** if protection must run before sign-in.
 8. macOS/Linux builds, hash-reputation and sandbox services if wanted.
 
@@ -177,6 +183,6 @@ entry; user data under `%APPDATA%` is kept by design. The installed binary repor
 * DPAPI protects against other users and offline copying, not against code running as the same user.
 * Real-time scanning happens after a file appears; it cannot prevent a download or an execution (the execution guard only marks confirmed-malicious files).
 * Telegram bot features were verified against a local protocol test double, not live Telegram.
-* Telegram reports are readable by Telegram; account-level monitoring does not exist.
+* Telegram reports are readable by Telegram. Account protection checks a file only after Telegram has delivered and SENTRIX has downloaded it.
 * History for very large scans retains only files needing attention (counts are exact).
 * The in-app UI was exercised by running the real built app and viewing it; there is no automated UI test suite.

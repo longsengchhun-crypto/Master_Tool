@@ -6,18 +6,22 @@ import { useApp } from '../lib/app';
 import { agoMs } from '../lib/format';
 import { usePolled } from '../lib/hooks';
 import type { NotifyPrefs, TelegramStatus } from '../lib/types';
-import { Button, Card, Disclosure, Modal, Notice, PageHeader, Pill, Toggle } from '../components/ui';
+import { Button, Card, Disclosure, Modal, Notice, PageHeader, Pill, Tabs, Toggle, type TabTone } from '../components/ui';
+import { TelegramAccount } from './TelegramAccount';
+import { TelegramModes } from './TelegramModes';
+
+type Tab = 'reports' | 'account' | 'groups' | 'downloads';
 
 const MORE: [keyof NotifyPrefs, string][] = [
   ['quarantined', 'When a file is quarantined automatically'],
   ['unableToVerify', 'Files that could not be fully checked (can be frequent)'],
   ['cleanScans', 'Every clean result (very frequent)'],
-  ['accountEvents', 'Bot connected or disconnected'],
+  ['accountEvents', 'If your Telegram account session ends'],
   ['includeHash', 'Include the file fingerprint (SHA-256) in reports'],
 ];
 
 export function Telegram() {
-  const { toast, refresh } = useApp();
+  const { toast, refresh, status } = useApp();
   const st = usePolled(() => api.tgStatus(), 5000);
   const [token, setToken] = useState('');
   const [show, setShow] = useState(false);
@@ -25,6 +29,7 @@ export function Telegram() {
   const [manual, setManual] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmOff, setConfirmOff] = useState(false);
+  const [tab, setTab] = useState<Tab>('reports');
   const t = st.data;
 
   if (!t) return st.error ? <Notice tone="danger" title="Telegram status is unavailable">{st.error}</Notice> : <div className="text-muted">Loading…</div>;
@@ -83,12 +88,57 @@ export function Telegram() {
   const problems = t.notify.engineProblems && t.notify.protectionStopped;
   const healthy = bot.connected && bot.lastTestOk !== false;
 
+  const a = t.account;
+  const tones: Record<Tab, TabTone> = {
+    reports: !bot.configured ? 'off' : healthy ? 'ok' : 'warn',
+    account:
+      a.state === 'connected' ? (a.options.enabled && a.connection === 'ready' ? 'ok' : 'warn')
+      : a.state === 'expired' || a.state === 'failed' || a.state === 'two_step_unsupported' ? 'warn'
+      : 'off',
+    groups: t.groups.shield ? (t.groups.privacyBlocks ? 'warn' : 'ok') : 'off',
+    downloads: d.folder ? (d.watching ? 'ok' : 'warn') : 'off',
+  };
+
   return (
     <div className="space-y-5">
-      <PageHeader title="Telegram" />
+      <PageHeader title="Telegram" subtitle="Choose what SENTRIX watches and where it reports. Each tab shows whether that part is working." />
+
 
       {!t.allowed && <Notice tone="info">Your organization does not allow Telegram on this device.</Notice>}
 
+
+      <TelegramModes
+        t={t}
+        engine={status?.engine}
+        busy={busy === 'both'}
+        onOpen={setTab}
+        onBoth={() => {
+          if (!bot.configured) {
+            setTab('reports');
+            toast('warn', 'Connect your bot first. Group and account protection both report through it.');
+            return;
+          }
+          // Groups can be switched on straight away; the account needs the person's own consent and QR approval.
+          const afterGroups = () => setTab('account');
+          if (!t.groups.shield) void run('both', () => api.tgSetGroupShield(true), (s) => { set(s); afterGroups(); });
+          else afterGroups();
+        }}
+      />
+
+      <Tabs
+        label="Telegram protection"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: 'reports', label: 'Reports', tone: tones.reports },
+          { id: 'account', label: 'Your account', tone: tones.account },
+          { id: 'groups', label: 'Groups', tone: tones.groups },
+          { id: 'downloads', label: 'Downloads', tone: tones.downloads },
+        ]}
+      />
+
+      {tab === 'reports' && (
+        <div role="tabpanel" id="panel-reports" aria-labelledby="tab-reports" className="space-y-5">
       {!bot.configured ? (
         <Card className="p-6">
           <h2 className="text-base font-semibold text-ink">Get results in your own Telegram bot</h2>
@@ -168,7 +218,41 @@ export function Telegram() {
               description="Send a file to your bot and get the result back. Only your own chat is accepted, files up to 20 MB, and this computer must be on."
             />
           </Card>
+        </>
+      )}
+      {bot.configured && (
+        <Disclosure title="More options">
+          <div className="divide-y divide-line px-5 py-1">
+            {MORE.map(([k, label]) => (
+              <Toggle key={k} checked={t.notify[k]} disabled={busy === 'opts' || !t.allowed} onChange={(v) => savePrefs({ [k]: v })} label={label} />
+            ))}
+          </div>
+          {t.recentNotifications.length > 0 && (
+            <ul className="divide-y divide-line border-t border-line">
+              {t.recentNotifications.slice(0, 8).map((n) => (
+                <li key={n.id} className="flex items-center justify-between gap-4 px-5 py-2.5 text-sm">
+                  <span className="text-ink">{n.kind.replace(/_/g, ' ')} <span className="text-xs text-muted">{agoMs(n.createdAt)}</span></span>
+                  <Pill tone={n.state === 'sent' ? 'ok' : n.state === 'dead' ? 'danger' : 'warn'}>{n.state === 'sent' ? 'Delivered' : n.state === 'dead' ? 'Gave up' : 'Waiting'}</Pill>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Disclosure>
+      )}
 
+        </div>
+      )}
+
+      {tab === 'account' && (
+        <div role="tabpanel" id="panel-account" aria-labelledby="tab-account">
+          {!bot.configured && a.state !== 'connected' && <div className="mb-5"><Notice tone="info">Results are sent to your own Telegram bot. Set it up under Reports first, or you will only see results here.</Notice></div>}
+          <TelegramAccount a={a} reload={st.reload} setData={(acc) => st.setData({ ...t, account: acc })} />
+        </div>
+      )}
+
+      {tab === 'groups' && (
+        <div role="tabpanel" id="panel-groups" aria-labelledby="tab-groups">
+          {bot.configured ? (
           <Card className="overflow-hidden">
             <div className="px-5 py-1">
               <Toggle
@@ -214,9 +298,18 @@ export function Telegram() {
               </div>
             )}
           </Card>
-        </>
+          ) : (
+            <Card className="p-6">
+              <h2 className="text-base font-semibold text-ink">Protect Telegram groups</h2>
+              <p className="mt-1 max-w-2xl text-sm text-muted">Group protection runs through your own bot, so connect it first. Then add the bot to a group and a group administrator sends /setup on there.</p>
+              <div className="mt-4"><Button variant="primary" onClick={() => setTab('reports')}>Set up your bot</Button></div>
+            </Card>
+          )}
+        </div>
       )}
 
+      {tab === 'downloads' && (
+        <div role="tabpanel" id="panel-downloads" aria-labelledby="tab-downloads">
       <Card className="p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -238,26 +331,7 @@ export function Telegram() {
         {d.error && <div className="mt-3"><Notice tone="warn">{d.error}</Notice></div>}
         {!d.folder && candidate && <p className="mt-2 text-xs text-muted">Found {candidate.path}. Check it matches Telegram, Settings, Advanced, Download path.</p>}
       </Card>
-
-      {bot.configured && (
-        <Disclosure title="More options">
-          <div className="divide-y divide-line px-5 py-1">
-            {MORE.map(([k, label]) => (
-              <Toggle key={k} checked={t.notify[k]} disabled={busy === 'opts' || !t.allowed} onChange={(v) => savePrefs({ [k]: v })} label={label} />
-            ))}
-          </div>
-          {t.recentNotifications.length > 0 && (
-            <ul className="divide-y divide-line border-t border-line">
-              {t.recentNotifications.slice(0, 8).map((n) => (
-                <li key={n.id} className="flex items-center justify-between gap-4 px-5 py-2.5 text-sm">
-                  <span className="text-ink">{n.kind.replace(/_/g, ' ')} <span className="text-xs text-muted">{agoMs(n.createdAt)}</span></span>
-                  <Pill tone={n.state === 'sent' ? 'ok' : n.state === 'dead' ? 'danger' : 'warn'}>{n.state === 'sent' ? 'Delivered' : n.state === 'dead' ? 'Gave up' : 'Waiting'}</Pill>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="border-t border-line px-5 py-3 text-xs text-muted">Scanning your whole Telegram account (chats, groups, channels) is not available in this version. It only covers Telegram Desktop downloads and files you send to your bot.</p>
-        </Disclosure>
+        </div>
       )}
 
       <Modal

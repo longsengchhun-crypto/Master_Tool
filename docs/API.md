@@ -58,7 +58,7 @@ require a password re-entry within the last 10 minutes (`403 reauth_required` â†
 | Method & path | Notes |
 |---|---|
 | `POST /api/device/enroll` | Anonymous + one-time code. 402 if no free license seat, 400 for invalid/expired/used code. Returns token (once), org, license, policy. |
-| `POST /api/device/heartbeat` | Body: versions + protection state, plus optional `queue {queued, failed, stuck}` and `telegram {botConnected, deliveryFailures24h, accountState}`. and optional `groups {registered, protected, autoDelete, scans24h, threats24h, errors24h}` (Group Shield, counts only). All are strict objects of counts/booleans/enum: any other key (file name, hash, chat id, token, message text) is rejected. Returns `{policy, license{state}, jobs[], update?}`; policy includes `telegramBotAllowed`, `telegramAccountAllowed` and `telegramGroupsAllowed`. |
+| `POST /api/device/heartbeat` | Body: versions + protection state, plus optional `queue {queued, failed, stuck}` and `telegram {botConnected, deliveryFailures24h, accountState, account? {scanned, threats, unverified}}`. and optional `groups {registered, protected, autoDelete, scans24h, threats24h, errors24h}` (Group Shield, counts only). All are strict objects of counts/booleans/enum: any other key (file name, hash, chat id, token, message text) is rejected. Returns `{policy, license{state}, jobs[], update?}`; policy includes `telegramBotAllowed`, `telegramAccountAllowed` and `telegramGroupsAllowed`. |
 | `POST /api/device/scans` | Scan metadata: counts + per-finding `sha256`, `verdict`, `source`. `fileName` stored only if the org policy allows it. |
 | `POST /api/device/events` | â‰¤ 50 events `{kind,severity,detail?}`. |
 | `POST /api/device/jobs/:id/result` | Only for the device's own, delivered jobs. |

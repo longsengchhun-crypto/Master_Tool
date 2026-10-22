@@ -79,7 +79,7 @@ fn ago_text(ms: Option<i64>) -> String {
     }
 }
 
-const HELP: &str = "<b>SENTRIX Group Shield</b>\nI scan files posted in this group on the bot owner's computer and report threats.\n\n/status: protection state\n/scanstatus: scan counts\n/setup: administrators turn protection on or off\n\n<b>Limits</b>\nOnly files sent as documents, up to 20 MB, and only while the owner's computer is on. Photos, videos and voice messages are not scanned. If I cannot see a file (Telegram privacy mode) or cannot check it fully, it is not reported as safe.";
+const HELP: &str = "<b>SENTRIX Group Shield</b>\nI scan files posted in this group on the bot owner's computer and report threats.\n\n/status: protection state\n/scanstatus: scan counts\n/report: administrators get a summary of the last 7 days\n/setup: administrators turn protection on or off\n\n<b>Limits</b>\nOnly files sent as documents, up to 20 MB, and only while the owner's computer is on. Photos, videos and voice messages are not scanned. If I cannot see a file (Telegram privacy mode) or cannot check it fully, it is not reported as safe.";
 
 impl Inner {
     /// The bot's own details, refreshed every ten minutes. Also records whether privacy mode hides group files from it.
@@ -219,7 +219,7 @@ impl Inner {
             }
         }
         let cmd = cmd.to_ascii_lowercase();
-        if !matches!(cmd.as_str(), "/help" | "/start" | "/status" | "/scanstatus" | "/setup") {
+        if !matches!(cmd.as_str(), "/help" | "/start" | "/status" | "/scanstatus" | "/setup" | "/report") {
             return;
         }
         let args: Vec<String> = words.map(|w| w.to_ascii_lowercase()).collect();
@@ -239,6 +239,13 @@ impl Inner {
             "/help" | "/start" => reply("help", HELP.into()),
             "/status" => reply("status", self.status_text(bot, me, g)),
             "/scanstatus" => reply("scanstatus", self.scanstatus_text(g)),
+            "/report" => match self.require_admin(bot, u) {
+                Ok(_) => reply("report", self.report_text(g)),
+                Err(why) => {
+                    self.rejected.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    reply("denied", why.into());
+                }
+            },
             "/setup" => {
                 let uid = match self.require_admin(bot, u) {
                     Ok(uid) => uid,
@@ -272,6 +279,17 @@ impl Inner {
             t += "\n\nAn administrator can send <code>/setup on</code> to start.";
         }
         t
+    }
+
+    /// Summary for administrators: counts only (no file names or senders), this group only.
+    fn report_text(&self, g: &Group) -> String {
+        let now = now_ms();
+        let week = self.store.group_stats(g.chat_id, now - 7 * 86_400_000).unwrap_or_default();
+        let all = self.store.group_stats(g.chat_id, 0).unwrap_or_default();
+        format!(
+            "<b>Security report</b> (this group only)\nLast 7 days: {} scanned, {} malicious, {} suspicious, {} not fully checked, {} skipped or failed\nAll time: {} scanned, {} malicious\nLast scan: {}\nProtection: {}. Automatic deletion: {}\n\nCounts only. A file that was not fully checked is not known to be safe. See /help for what cannot be scanned.",
+            week.scans, week.threats, week.suspicious, week.unverified, week.skipped + week.errors, all.scans, all.threats, ago_text(all.last_scan_at), if g.enabled { "on" } else { "off" }, if g.auto_delete { "on" } else { "off" }
+        )
     }
 
     fn scanstatus_text(&self, g: &Group) -> String {

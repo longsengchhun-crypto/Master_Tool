@@ -196,3 +196,30 @@ export function Disclosure({ title, hint, children, defaultOpen = false }: { tit
     </details>
   );
 }
+
+export type TabTone = 'ok' | 'warn' | 'danger' | 'off';
+
+/** Section tabs. The dot is real status, not decoration: green = working, amber = needs attention, red = broken, grey = not set up. */
+export function Tabs<T extends string>({ tabs, value, onChange, label }: { tabs: { id: T; label: string; tone: TabTone }[]; value: T; onChange: (id: T) => void; label: string }) {
+  const dot = { ok: 'bg-ok', warn: 'bg-warn', danger: 'bg-danger', off: 'bg-strong' };
+  const word = { ok: 'working', warn: 'needs attention', danger: 'problem', off: 'not set up' };
+  return (
+    <div role="tablist" aria-label={label} className="mb-5 flex gap-1 border-b border-line">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          role="tab"
+          id={`tab-${t.id}`}
+          aria-selected={value === t.id}
+          aria-controls={`panel-${t.id}`}
+          onClick={() => onChange(t.id)}
+          className={`-mb-px flex h-10 items-center gap-2 border-b-2 px-3.5 text-sm transition-colors ${value === t.id ? 'border-accent font-semibold text-ink' : 'border-transparent text-muted hover:text-ink'}`}
+        >
+          <span className={`size-2 rounded-full ${dot[t.tone]}`} aria-hidden />
+          {t.label}
+          <span className="sr-only"> ({word[t.tone]})</span>
+        </button>
+      ))}
+    </div>
+  );
+}

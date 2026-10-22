@@ -53,7 +53,7 @@
 | T28 | Files lost or "scanned clean" after crash, lock, restart or change during scan | Durable job queue, coalescing, `dirty` flag, stale results, retry with backoff, stuck-job recovery, startup reconciliation; failures never become CLEAN | `queue` + `service` tests (real ClamAV pipeline) |
 | T29 | Fake "connected" or "protected" status | Connection state comes from Telegram's response; protection state from monitor/queue/engine health; "could not check" is a separate, visible list | UI + tests |
 | T30 | Execution guard abused to deny access to arbitrary files (path injection, links) | Applied only to a hash-verified MALICIOUS file; absolute `icacls`, argv-only; links refused; read-back verified | `guard` tests |
-| T31 | Telegram account credentials harvested | **No credential entry exists.** Account transport is not implemented; the session vault only holds a library-produced session blob, DPAPI-protected, never a password/code/2FA | `account` tests; see [TELEGRAM.md](TELEGRAM.md) |
+| T31 | Telegram account credentials harvested | **No credential entry exists.** Sign-in is QR-only inside Telegram; a cloud-password account is refused and signed out. The vault holds only the random key that encrypts TDLib's database, DPAPI-protected; the library's files are SHA-256 pinned and verified before loading | `account_td`/`tdjson` tests; see [TELEGRAM_ACCOUNT.md](TELEGRAM_ACCOUNT.md) |
 | T33 | A non-administrator (or an administrator of another group) changes a group's protection | Every configuration command checks the sender with a live `getChatMember` for that exact group; display names and text are never trusted; anonymous administrators are refused | `tests/groups.rs` |
 | T34 | Automatic deletion switched on by accident or by the wrong person | Off by default; two steps by the same named administrator within 5 minutes; delete permission checked at request, at confirmation and again at the moment of deletion; only MALICIOUS can trigger it; success is claimed only when Telegram returns ok | `tests/groups.rs` (incl. real ClamAV) |
 | T35 | One group reads or alters another group's settings or history | All rows keyed by chat id, every query filters on it; per-group rate limits and counters | `groups_cannot_see_or_change_each_others_settings_or_history` |
@@ -67,7 +67,7 @@
 * **No kernel execution blocking**: SENTRIX cannot stop a program the user launches. It can add a reversible deny-execute
   permission to a confirmed-malicious file (execution guard), nothing more.
 * **Telegram can read reports** sent to the user's bot; the user chose the bot, but must trust it and Telegram.
-* **Telegram account monitoring is not implemented**; the bot and Desktop folder cover only what they can see.
+* **Telegram account protection has not been exercised with a real signed-in account yet.** The development TDLib binary is a third-party build; build from Telegram's source before distribution. See TELEGRAM_ACCOUNT.md.
 * **Tray app, not a service**: no protection while SENTRIX is not running.
 * **ClamAV vulnerabilities**: ClamAV parses hostile files in a native process. Keep it updated (1.5.4 contains fixes for
   several 2026 parser CVEs). It runs unprivileged as the user, not sandboxed beyond that.

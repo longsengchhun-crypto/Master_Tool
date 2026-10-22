@@ -58,11 +58,30 @@ pub struct TelegramSettings {
     pub group_shield: bool,
     /// Organization policy can forbid scanning groups.
     pub groups_allowed: bool,
+    /// What the connected personal account is allowed to look at. The account session itself is never in settings.
+    pub account: AccountSettings,
+}
+
+/// Personal-account monitoring choices. Private chats on; groups, channels and media are opt-in.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AccountSettings {
+    pub enabled: bool,
+    pub private_chats: bool,
+    pub groups: bool,
+    pub channels: bool,
+    pub media: bool,
+}
+
+impl Default for AccountSettings {
+    fn default() -> Self {
+        AccountSettings { enabled: true, private_chats: true, groups: false, channels: false, media: false }
+    }
 }
 
 impl Default for TelegramSettings {
     fn default() -> Self {
-        TelegramSettings { chat_id: None, bot_username: None, notify: NotifyPrefs::default(), accept_submissions: false, desktop_folder: None, bot_allowed: true, account_allowed: true, group_shield: false, groups_allowed: true }
+        TelegramSettings { chat_id: None, bot_username: None, notify: NotifyPrefs::default(), accept_submissions: false, desktop_folder: None, bot_allowed: true, account_allowed: true, group_shield: false, groups_allowed: true, account: AccountSettings::default() }
     }
 }
 
@@ -234,6 +253,8 @@ pub struct AppState {
     pub jobs: Arc<JobStore>,
     pub service: Arc<ProtectionService>,
     pub tg_vault: TokenVault,
+    /// Personal Telegram account protection (TDLib). Separate from the bot: either can be off while the other works.
+    pub account: Arc<sentrix_core::account_td::TdAccount>,
     /// Hashes already notified this session, to prevent notification spam.
     pub notified: Mutex<HashSet<String>>,
 }

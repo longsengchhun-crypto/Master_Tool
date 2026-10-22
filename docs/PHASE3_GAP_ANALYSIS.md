@@ -30,6 +30,19 @@ live Telegram. Coverage is limited by Telegram (privacy mode, 20 MB, documents o
 
 ## Personal Telegram account protection: status
 
+**Update 2026-10-22: implemented on TDLib (see [TELEGRAM_ACCOUNT.md](TELEGRAM_ACCOUNT.md)).** The owner confirmed an `api_id`/`api_hash`
+and a test account are available and decided that accounts with a two-step password are **unsupported** (no password is ever
+requested). What changed: TDLib loaded at runtime through a SHA-256-pinned JSON binding; QR-only login; encrypted TDLib database
+whose key is DPAPI-protected; attachment pipeline with the earlier gate semantics; desktop UI; console counts.
+
+**Honest status:** the real library loads and talks to Telegram's servers (rejecting an invalid `api_id` with `API_ID_INVALID`),
+and the state machine is unit-tested against a scripted TDLib. A real QR login with a real account and a real received
+attachment has **not** been run. The `live_` test for it exists and needs the credentials and a person scanning the code.
+
+The remainder of this section describes the position *before* that update and is kept as the record of why it was deferred:
+
+
+
 **Not implemented. The live transport cannot be built or verified in this environment.**
 
 What exists and is tested (Phase 2): a DPAPI-protected session vault with wipe, an attachment gate with chat-category switches
@@ -78,6 +91,5 @@ implemented via folder monitoring) or, for an account transport, when its downlo
 
 * Per-user notification routing, bot token handling, delivery status, retries, dedupe, rate limiting, expired-token handling:
   already implemented in Phase 2 (outbox).
-* Account connection UI, chat-category controls and "last synchronization" display: not added, because there is nothing to
-  connect; the page states honestly that account monitoring is not available. They belong with the real transport.
-* Admin dashboard: account connection counts are `not_available`; group counts are reported.
+* Account connection UI, chat-category controls and "last synchronization" display: added with the transport (Telegram → Your account).
+* Admin dashboard: account state (connected/expired), files checked, threats and not-checked counts are reported; group counts as before.

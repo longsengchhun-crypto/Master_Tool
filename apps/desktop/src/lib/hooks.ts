@@ -25,9 +25,11 @@ export function usePolled<T>(fn: () => Promise<T>, ms = 4000) {
     void reload();
     const t = setInterval(() => void reload(), ms);
     const un = listen('protection-changed', () => void reload());
+    const un2 = listen('tg-account-changed', () => void reload());
     return () => {
       clearInterval(t);
       void un.then((f) => f());
+      void un2.then((f) => f());
     };
   }, [reload, ms]);
 

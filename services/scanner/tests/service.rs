@@ -244,7 +244,7 @@ fn account_attachments_respect_category_size_backpressure_and_leave_nothing_behi
     assert_eq!(gate.ingest(&r.svc, &att(ChatKind::Channel, 10), &mut &b"x"[..]).unwrap_err(), IngestError::CategoryDisabled);
     assert_eq!(gate.ingest(&r.svc, &att(ChatKind::Private, 500 * 1024 * 1024), &mut &b"x"[..]).unwrap_err(), IngestError::TooLarge);
     let rep = gate.ingest(&r.svc, &att(ChatKind::Private, 10), &mut &b"%PDF-1.4 x"[..]).unwrap();
-    assert_eq!(rep.origin.as_deref(), Some("Telegram account"));
+    assert_eq!(rep.origin.as_deref(), Some("Telegram personal chat"));
     assert_ne!(rep.verdict, Verdict::Clean, "no engine, so never clean");
     assert_eq!(gate.in_flight(), 0);
     assert!(until(5, || !r.tmp.exists() || std::fs::read_dir(&r.tmp).unwrap().count() == 0));
@@ -481,7 +481,7 @@ fn pipeline_with_real_engine() {
         let gate = AttachmentGate::new(AccountPrefs::default(), 2);
         let att = IncomingAttachment { chat_kind: ChatKind::Private, display_name: "photo-album.zip".into(), size: 100 };
         let rep = gate.ingest(&r.svc, &att, &mut make_zip(&[("e.com", &eicar_bytes())]).as_slice()).unwrap();
-        assert_eq!((rep.verdict, rep.origin.as_deref()), (Verdict::Malicious, Some("Telegram account")));
+        assert_eq!((rep.verdict, rep.origin.as_deref()), (Verdict::Malicious, Some("Telegram personal chat")));
         assert!(until(5, || !r.tmp.exists() || std::fs::read_dir(&r.tmp).unwrap().count() == 0));
         r.svc.stop();
         println!("[ok] account attachment path scans with the real engine and leaves nothing behind");
