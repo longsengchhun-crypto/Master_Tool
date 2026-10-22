@@ -183,7 +183,6 @@ pub fn run() {
             tg_account_connect,
             tg_account_disconnect,
             tg_account_set_options,
-            tg_account_set_route,
             tg_group_disable,
             tg_group_leave,
             account_status,

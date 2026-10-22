@@ -372,21 +372,6 @@ export interface AccountOptions {
   groups: boolean;
   channels: boolean;
   media: boolean;
-  /** Post each result into the person's Scan History group (or Saved Messages) from their own account. */
-  localReports: boolean;
-}
-
-/** A group the person is in. `route`: the Scan History group (chat id) its results go to, or null for all of them. */
-export interface AccountGroup {
-  chatId: number;
-  title: string;
-  route: number | null;
-}
-
-/** One of the person's Scan History groups. They all share a name, so each has a number. */
-export interface AccountRoom {
-  chatId: number;
-  num: number;
 }
 
 export interface AccountRecent {
@@ -408,8 +393,6 @@ export type TgAccount = AccountLink & {
   pending: number;
   counts: { scanned: number; threats: number; suspicious: number; inaccessible: number; skipped: number };
   recent: AccountRecent[];
-  groups: AccountGroup[];
-  rooms: AccountRoom[];
   /** Organization policy. */
   allowed: boolean;
   options: AccountOptions;

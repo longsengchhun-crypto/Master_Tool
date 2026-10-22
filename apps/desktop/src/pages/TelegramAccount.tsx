@@ -7,10 +7,9 @@ import type { AccountOptions, AccountRecent, TgAccount } from '../lib/types';
 import { Button, Card, Modal, Notice, Pill, Toggle } from '../components/ui';
 
 const CAN = [
-  'Files sent to you in private chats and posted in the groups you are in. Channels only if you switch them on below.',
+  'Files sent to you in private chats. Groups and channels only if you switch them on below.',
   'The file name, size and type of each attachment. Message text is never read or kept.',
   'A private copy of each file, which it checks and then deletes.',
-  'It posts each result from your own account into your Scan History group, or your Saved Messages.',
 ];
 
 const CANNOT = [
@@ -18,7 +17,7 @@ const CANNOT = [
   'Chats where Telegram blocks saving (protected content). Those files are listed as not checked.',
   'Anything before it has arrived: a file is checked after it downloads, never before.',
   'Files over 200 MB, and accounts that use a two-step password.',
-  'Anything while this computer is off or offline: it runs here, on your computer, and nowhere else.',
+  'Anything while this computer is off or offline.',
 ];
 
 export function connectionText(c: TgAccount['connection']): string {
@@ -130,65 +129,12 @@ export function TelegramAccount({ a, reload, setData }: { a: TgAccount; reload: 
         </Card>
 
         <Card className="divide-y divide-line px-5 py-1">
-          <Toggle checked={a.options.enabled} disabled={busy === 'opts'} onChange={(v) => setOpt({ enabled: v })} label="Check files sent to me" description="Turn this off to pause without signing out." />
-          <Toggle checked={a.options.localReports} disabled={busy === 'opts' || paused} onChange={(v) => setOpt({ localReports: v })} label="Post results in Telegram" description="Each result is posted from your account into your Scan History group. With no such group, only dangerous or suspicious results go to your Saved Messages. Off: results appear only in this app." />
+          <Toggle checked={a.options.enabled} disabled={busy === 'opts'} onChange={(v) => setOpt({ enabled: v })} label="Check files sent to me" description="Turn this off to pause without signing out. Your bot and group protection are not affected." />
           <Toggle checked={a.options.privateChats} disabled={busy === 'opts' || paused} onChange={(v) => setOpt({ privateChats: v })} label="Private chats" description="Files people send you directly. This is where most unwanted files arrive." />
-          <Toggle checked={a.options.groups} disabled={busy === 'opts' || paused} onChange={(v) => setOpt({ groups: v })} label="Groups" description="Files posted in any group you are a member of, administrator or not. Busy groups can mean many downloads." />
+          <Toggle checked={a.options.groups} disabled={busy === 'opts' || paused} onChange={(v) => setOpt({ groups: v })} label="Groups" description="Files posted in groups you belong to. Busy groups can mean many downloads." />
           <Toggle checked={a.options.channels} disabled={busy === 'opts' || paused} onChange={(v) => setOpt({ channels: v })} label="Channels" description="Files posted in channels you follow." />
           <Toggle checked={a.options.media} disabled={busy === 'opts' || paused} onChange={(v) => setOpt({ media: v })} label="Photos, videos and voice messages" description="Off by default. Programs and scripts arrive as files, not as media, so most people do not need this." />
         </Card>
-
-        <Card className="overflow-hidden">
-          <header className="flex min-h-12 items-center justify-between border-b border-line px-5">
-            <h3 className="text-sm font-semibold text-ink">Scan History</h3>
-            {a.rooms.length > 0 && <Pill tone="ok">{a.rooms.length === 1 ? 'Found' : `${a.rooms.length} found`}</Pill>}
-          </header>
-          {a.rooms.length === 0 ? (
-            <div className="space-y-2 px-5 py-4 text-sm text-muted">
-              <p>Results need somewhere to go. In Telegram, <span className="font-medium text-ink">make a new group called Scan History</span>. You can add other people to it: everyone in it can read the results.</p>
-              <p>SENTRIX notices the group by itself, usually within a minute, and starts posting there. Until then, only dangerous or suspicious results are saved to your Saved Messages.</p>
-            </div>
-          ) : (
-            <div className="px-5 py-3 text-sm text-muted">
-              <p>
-                {a.rooms.map((r) => `Scan History #${r.num}`).join(', ')}. Results are posted there from your account. You can make as many as you like; each one is numbered because they share a name. Everyone in a Scan History group can read the results, so add only people who should.
-              </p>
-            </div>
-          )}
-        </Card>
-
-        {a.groups.length > 0 && (
-          <Card className="overflow-hidden">
-            <header className="flex min-h-12 items-center justify-between border-b border-line px-5">
-              <h3 className="text-sm font-semibold text-ink">Your groups</h3>
-              <span className="text-xs text-muted">{a.groups.length} group{a.groups.length === 1 ? '' : 's'} watched</span>
-            </header>
-            <ul className="max-h-80 divide-y divide-line overflow-y-auto">
-              {a.groups.map((g) => (
-                <li key={g.chatId} className="flex items-center justify-between gap-4 px-5 py-2.5 text-sm">
-                  <span className="min-w-0 truncate font-semibold text-ink">{g.title || 'Unnamed group'}</span>
-                  {a.rooms.length > 1 ? (
-                    <select
-                      aria-label={`Where results for ${g.title} go`}
-                      value={g.route ?? 'all'}
-                      disabled={busy === `r${g.chatId}`}
-                      onChange={(e) => run(`r${g.chatId}`, () => api.tgAccountSetRoute(g.chatId, e.target.value === 'all' ? null : Number(e.target.value)))}
-                      className="h-9 shrink-0 rounded-lg border border-strong bg-solid px-2 text-sm text-ink"
-                    >
-                      <option value="all">All Scan History groups</option>
-                      {a.rooms.map((r) => (
-                        <option key={r.chatId} value={r.chatId}>Scan History #{r.num}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <span className="shrink-0 text-xs text-muted">{a.rooms.length === 1 ? `Scan History #${a.rooms[0].num}` : 'Saved Messages (threats only)'}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-            <p className="border-t border-line px-5 py-3 text-xs text-muted">Any group you are in is checked while Groups is on, whether or not you are its administrator. Several groups can report to the same Scan History group, or each can have its own.</p>
-          </Card>
-        )}
 
         <Card className="overflow-hidden">
           <header className="flex min-h-12 items-center border-b border-line px-5">
@@ -241,7 +187,7 @@ export function TelegramAccount({ a, reload, setData }: { a: TgAccount; reload: 
     <Card className="p-6">
       {problem && <div className="mb-5"><Notice tone={problem.tone} title={problem.title}>{problem.text}</Notice></div>}
       <h2 className="text-base font-semibold text-ink">Check files that reach your Telegram account</h2>
-      <p className="mt-1 max-w-2xl text-sm text-muted">Sign in once with a QR code. When someone sends you a file, SENTRIX downloads its own copy, checks it with the security engine, posts the result in your own Scan History group (or your Saved Messages) from your account, and deletes the copy. No bot and no server of ours is involved.</p>
+      <p className="mt-1 max-w-2xl text-sm text-muted">Sign in once with a QR code. When someone sends you a file, SENTRIX downloads its own copy, checks it with the security engine, tells you the result in your bot, and deletes the copy.</p>
 
       <div className="mt-5 grid gap-x-10 gap-y-5 md:grid-cols-2">
         <div>

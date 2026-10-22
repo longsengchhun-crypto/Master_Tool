@@ -132,7 +132,7 @@ function health(scn: string): ProtectionHealth {
 /** Dev preview only. ?acct=connected|disconnected|waiting|expired|twostep|failed|unconfigured|paused|offline */
 function tgAccount(scn: string): TgAccount {
   const q = new URLSearchParams(location.search).get('acct') ?? (scn === 'healthy' || scn === 'managed' ? 'connected' : 'disconnected');
-  const base = { qrSvg: null, display: null, connection: 'ready' as const, lastSyncAt: null, lastScanAt: null, pending: 0, counts: { scanned: 0, threats: 0, suspicious: 0, inaccessible: 0, skipped: 0 }, recent: [], groups: [], rooms: [], allowed: true, options: { enabled: true, privateChats: true, groups: true, channels: false, media: false, localReports: true } };
+  const base = { qrSvg: null, display: null, connection: 'ready' as const, lastSyncAt: null, lastScanAt: null, pending: 0, counts: { scanned: 0, threats: 0, suspicious: 0, inaccessible: 0, skipped: 0 }, recent: [], allowed: true, options: { enabled: true, privateChats: true, groups: false, channels: false, media: false } };
   // A placeholder pattern, not a real login code.
   let d = '';
   for (let y = 0; y < 29; y++) for (let x = 0; x < 29; x++) if ((x * 7 + y * 13 + x * y) % 5 < 2 || (x < 8 && y < 8) || (x > 20 && y < 8) || (x < 8 && y > 20)) d += `M${x + 4},${y + 4}h1v1h-1z`;
@@ -143,8 +143,6 @@ function tgAccount(scn: string): TgAccount {
     case 'offline':
       return { ...base, state: 'connected', display: 'Sam', connection: q === 'offline' ? 'waiting_for_network' : 'ready', lastSyncAt: min(q === 'offline' ? 34 : 1), lastScanAt: min(7), pending: 1,
         options: { ...base.options, enabled: q !== 'paused' },
-        rooms: [{ chatId: -1001, num: 1 }, { chatId: -1002, num: 2 }],
-        groups: [{ chatId: -100777, title: 'Design team', route: -1001 }, { chatId: -100888, title: 'Family', route: null }, { chatId: -100999, title: 'Client files', route: -1002 }],
         counts: { scanned: 23, threats: 1, suspicious: 0, inaccessible: 2, skipped: 5 },
         recent: [
           { at: min(7), name: 'Invoice-0921.zip', kind: 'private', verdict: 'MALICIOUS', note: 'Win.Test.EICAR_HDB-1 in a zip' },
@@ -235,7 +233,6 @@ export function installMock() {
     tg_account_connect: () => tgAccount(scn),
     tg_account_disconnect: () => tgAccount(scn),
     tg_account_set_options: () => tgAccount(scn),
-    tg_account_set_route: () => tgAccount(scn),
     tg_detect_desktop: () => telegram(scn).desktop.detection,
     start_engine: () => status(scn).engine,
     get_settings: () => settings(),

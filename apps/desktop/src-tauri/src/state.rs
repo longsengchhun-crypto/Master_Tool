@@ -77,14 +77,11 @@ pub struct AccountSettings {
     pub groups: bool,
     pub channels: bool,
     pub media: bool,
-    /// Post each result into the person's Scan History group (or Saved Messages) from their own account.
-    pub local_reports: bool,
 }
 
 impl Default for AccountSettings {
     fn default() -> Self {
-        // Groups are on: checking the groups a person is in is the main job. Channels and media stay opt-in.
-        AccountSettings { enabled: true, private_chats: true, groups: true, channels: false, media: false, local_reports: true }
+        AccountSettings { enabled: true, private_chats: true, groups: false, channels: false, media: false }
     }
 }
 
