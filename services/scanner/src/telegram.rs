@@ -319,6 +319,12 @@ impl BotClient {
         Ok(r["message_id"].as_i64().unwrap_or(0))
     }
 
+    /// Replace the text of a message the bot sent earlier.
+    pub fn edit_message_text(&self, chat_id: i64, message_id: i64, text: &str) -> Result<(), TgError> {
+        let text: String = text.chars().take(MAX_MESSAGE_CHARS).collect();
+        self.call("editMessageText", &json!({ "chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": true }), None).map(|_| ())
+    }
+
     /// Acknowledge a button tap (stops the spinner on the user's screen).
     pub fn answer_callback(&self, callback_id: &str, text: Option<&str>) -> Result<(), TgError> {
         let mut body = json!({ "callback_query_id": callback_id });

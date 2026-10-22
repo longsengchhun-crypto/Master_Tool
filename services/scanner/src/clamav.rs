@@ -147,8 +147,10 @@ impl ClamEngine {
         std::fs::write(
             &conf,
             format!(
-                "DatabaseDirectory {}\nTCPSocket {port}\nTCPAddr 127.0.0.1\nForeground yes\nMaxThreads 4\nStreamMaxLength 512M\nMaxFileSize 512M\nMaxScanSize 1024M\nMaxRecursion 16\nMaxFiles 20000\nAlertEncrypted yes\nAlertExceedsMax yes\nLogTime yes\n",
-                conf_path(&self.db_dir())
+                "DatabaseDirectory {}\nTCPSocket {port}\nTCPAddr 127.0.0.1\nForeground yes\nMaxThreads 4\nStreamMaxLength 512M\nMaxFileSize 512M\nMaxScanSize 1024M\nMaxRecursion 16\nMaxFiles 20000\nAlertEncrypted yes\nAlertExceedsMax yes\nLogTime yes\n{}",
+                conf_path(&self.db_dir()),
+                // Operator tuning without a rebuild: extra clamd.conf lines separated by ';' (read from the environment only).
+                std::env::var("SENTRIX_CLAMD_EXTRA").map(|e| e.split(';').map(|l| format!("{}\n", l.trim())).collect::<String>()).unwrap_or_default()
             ),
         )?;
         let child = crate::proc::no_window(Command::new(self.exe("clamd")).arg(format!("--config-file={}", conf.display())).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()))

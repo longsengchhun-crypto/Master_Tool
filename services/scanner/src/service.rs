@@ -35,6 +35,10 @@ pub struct WatchRoot {
     pub label: String,
 }
 
+/// Files being checked at once for protected groups, and how many may wait.
+pub const DOC_WORKERS: usize = 3;
+pub const DOC_QUEUE: usize = 64;
+
 #[derive(Clone)]
 pub struct ServiceConfig {
     pub realtime: bool,
@@ -67,6 +71,17 @@ pub trait Hooks: Send + Sync {
     /// Called once per final result (never for a result that will be retried).
     fn on_report(&self, report: &ScanReport);
     fn on_health_changed(&self) {}
+    /// Where the time went for one file posted in a protected group. Numbers only: no name, no group.
+    fn on_group_scan(&self, _t: &GroupScanTiming) {}
+}
+
+#[derive(Debug, Clone)]
+pub struct GroupScanTiming {
+    pub size: u64,
+    pub download_ms: u64,
+    pub scan_ms: u64,
+    pub total_ms: u64,
+    pub verdict: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -119,7 +134,11 @@ pub(crate) struct Inner {
     pub(crate) last_event: AtomicI64,
     pub(crate) submission_times: Mutex<VecDeque<Instant>>,
 
-    pub(crate) groups: crate::group::GroupState,}
+    pub(crate) groups: crate::group::GroupState,
+    /// Files posted in protected groups are checked by a small pool of workers, so one big file never holds up everyone else
+    /// and the listening thread keeps listening.
+    pub(crate) docs: Mutex<Option<std::sync::mpsc::SyncSender<crate::group::DocJob>>>,
+}
 
 pub struct ProtectionService {
     inner: Arc<Inner>,
@@ -509,6 +528,7 @@ impl ProtectionService {
                 last_event: AtomicI64::new(0),
                 submission_times: Mutex::new(VecDeque::new()),
                 groups: Default::default(),
+                docs: Mutex::new(None),
             }),
             threads: Mutex::new(vec![]),
         }
@@ -594,6 +614,32 @@ impl ProtectionService {
         let mut th = self.threads.lock().unwrap();
         let spawn = |name: &str, f: Box<dyn FnOnce() + Send>| std::thread::Builder::new().name(name.into()).spawn(f).expect("thread");
 
+        // The document pool (see `Inner::docs`).
+        let (doc_tx, doc_rx) = std::sync::mpsc::sync_channel::<crate::group::DocJob>(DOC_QUEUE);
+        *inner.docs.lock().unwrap() = Some(doc_tx);
+        let doc_rx = Arc::new(Mutex::new(doc_rx));
+        for i in 0..DOC_WORKERS {
+            let (me, rx) = (inner.clone(), doc_rx.clone());
+            th.push(spawn(&format!("sentrix-docs-{i}"), Box::new(move || {
+                while !me.stop.load(Ordering::Relaxed) {
+                    let job = { rx.lock().unwrap().recv_timeout(Duration::from_millis(400)) };
+                    match job {
+                        Ok(j) => {
+                            let key = (j.group.chat_id, j.mid);
+                            // A crash while checking one file must not take a worker (or anyone else's file) with it.
+                            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| me.run_document(j))).is_err() {
+                                me.event("worker_panic", "critical", "Checking a file posted in a group crashed internally and was contained.");
+                                me.settle_placeholder_after_crash(key.0, key.1);
+                            }
+                            me.groups.inflight.lock().unwrap().remove(&key);
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
+                }
+            })));
+        }
+
         for i in 0..inner.cfg.read().unwrap().workers.clamp(1, 4) {
             let me = inner.clone();
             th.push(spawn(&format!("sentrix-worker-{i}"), Box::new(move || {
@@ -642,7 +688,8 @@ impl ProtectionService {
 
         let me = inner.clone();
         th.push(spawn("sentrix-outbox", Box::new(move || {
-            while me.nap(1500) {
+            // Short on purpose: a result should leave within a fraction of a second of being ready.
+            while me.nap(150) {
                 let (cfg_chat, relay, hosted) = {
                     let c = me.cfg.read().unwrap();
                     (c.chat_id, c.relay, c.hosted.is_some())
@@ -662,13 +709,17 @@ impl ProtectionService {
         let me = inner.clone();
         th.push(spawn("sentrix-tgbot", Box::new(move || {
             let mut backoff = 5u64;
-            while me.nap(1000) {
+            // Long polling already waits for news; pausing a second between polls only made the next message late.
+            while me.nap(20) {
                 let (bot, chat, on, shield, hosted) = {
                     let c = me.cfg.read().unwrap();
                     (me.bot.read().unwrap().clone(), if c.hosted.is_some() { Some(c.chat_id.unwrap_or(0)) } else { c.chat_id }, c.accept_submissions, c.group_shield, c.hosted.is_some())
                 };
                 // One worker serves both features; it only runs while at least one of them is switched on.
-                let (Some(bot), Some(chat), true) = (bot, chat, on || shield || hosted) else { continue };
+                let (Some(bot), Some(chat), true) = (bot, chat, on || shield || hosted) else {
+                    me.nap(1000); // nothing to listen for yet
+                    continue;
+                };
                 let offset = me.store.kv_get("tg_offset").and_then(|s| s.parse::<i64>().ok());
                 match bot.get_updates(offset, 10, 20) {
                     Ok(updates) => {

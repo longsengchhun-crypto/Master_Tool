@@ -33,6 +33,10 @@ impl Hooks for LogHooks {
     fn on_report(&self, r: &ScanReport) {
         println!("[scan] verdict={} complete={}", r.verdict.label(), r.complete);
     }
+
+    fn on_group_scan(&self, t: &sentrix_core::service::GroupScanTiming) {
+        println!("[time] {} KB: download {:.1}s, check {:.1}s, total {:.1}s ({})", t.size / 1024, t.download_ms as f64 / 1000.0, t.scan_ms as f64 / 1000.0, t.total_ms as f64 / 1000.0, t.verdict);
+    }
 }
 
 fn load_env_file(path: &std::path::Path) {

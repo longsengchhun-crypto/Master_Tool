@@ -49,6 +49,8 @@ pub struct State {
     pub markup: Vec<Option<Value>>,
     /// Callback ids the bot answered.
     pub answered: Vec<String>,
+    /// Ids of messages the bot edited in place.
+    pub edited: Vec<i64>,
     /// The next this-many getUpdates calls are answered with 409 (another program is reading the bot's messages).
     pub poll_conflicts: u32,
     /// (chat, user) pairs Telegram reports as not being in that group.
@@ -394,6 +396,25 @@ fn handle(mut conn: TcpStream, state: Arc<Mutex<State>>) {
                 std::thread::sleep(Duration::from_millis(150));
             }
             json_resp(&mut conn, 200, json!({"ok": true, "result": r}));
+        }
+        "editMessageText" => {
+            let chat = body["chat_id"].as_i64().unwrap_or(0);
+            let id = body["message_id"].as_i64().unwrap_or(0);
+            let text = body["text"].as_str().unwrap_or("").to_string();
+            let mut s = state.lock().unwrap();
+            let idx = (id - 1) as usize;
+            match s.sent.get_mut(idx) {
+                Some(m) if m.0 == chat => {
+                    m.1 = text;
+                    s.edited.push(id);
+                    drop(s);
+                    json_resp(&mut conn, 200, json!({"ok": true, "result": {"message_id": id}}));
+                }
+                _ => {
+                    drop(s);
+                    json_resp(&mut conn, 400, json!({"ok": false, "error_code": 400, "description": "Bad Request: message to edit not found"}));
+                }
+            }
         }
         "answerCallbackQuery" => {
             let id = body["callback_query_id"].as_str().unwrap_or("").to_string();

@@ -277,6 +277,53 @@ fn groups_linked_before_the_default_changed_are_corrected_once_and_a_later_choic
     assert!(!store.group_get(A).unwrap().unwrap().report_clean, "the choice is kept");
 }
 
+#[test]
+fn a_big_file_gets_a_checking_message_at_once_that_is_replaced_by_the_result_not_followed_by_a_second_one() {
+    let r = rig();
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    std::thread::sleep(Duration::from_secs(2));
+    // 2 MB: above the threshold. No scan engine here, so the honest result is "could not be fully checked".
+    r.mock.add_group_document(n, A, 80, MEMBER, "big-design.zip", vec![7u8; 2_000_000], None);
+    assert!(until(25, || r.mock.texts_in(H).iter().any(|t| t.contains("could not be fully checked"))), "{:?}", r.mock.texts_in(H));
+    let about: Vec<String> = r.mock.texts_in(H).into_iter().filter(|t| t.contains("big-design.zip")).collect();
+    assert_eq!(about.len(), 1, "one message about the file, edited in place: {about:?}");
+    assert!(!about[0].contains("Checking this file now"), "the placeholder was replaced: {}", about[0]);
+    assert!(!r.mock.state.lock().unwrap().edited.is_empty(), "it was edited, not re-sent");
+    assert!(r.mock.texts_in(A).is_empty(), "the protected group never sees any of it");
+    r.svc.stop();
+}
+
+#[test]
+fn a_small_file_gets_no_checking_message_just_the_result() {
+    let r = rig();
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    std::thread::sleep(Duration::from_secs(2));
+    r.mock.add_group_document(n, A, 81, MEMBER, "small.pdf", b"%PDF-1.4".to_vec(), None);
+    assert!(until(20, || r.mock.texts_in(H).iter().any(|t| t.contains("small.pdf"))));
+    assert!(r.mock.state.lock().unwrap().edited.is_empty(), "nothing to replace");
+    r.svc.stop();
+}
+
+#[test]
+fn files_posted_in_different_groups_at_once_do_not_wait_for_each_other() {
+    let r = rig();
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    link(&r, KIM, B, &mut n);
+    std::thread::sleep(Duration::from_secs(2));
+    let t = Instant::now();
+    for i in 0..6 {
+        r.mock.add_group_document(n + i, if i % 2 == 0 { A } else { B }, 200 + i, MEMBER, &format!("f{i}.pdf"), b"%PDF-1.4".to_vec(), None);
+    }
+    assert!(until(30, || (0..6).all(|i| r.mock.texts_in(if i % 2 == 0 { SAM } else { KIM }).iter().any(|t| t.contains(&format!("f{i}.pdf"))))), "all six results must arrive");
+    assert!(t.elapsed() < Duration::from_secs(12), "six small files from two groups took {:?}", t.elapsed());
+    r.svc.stop();
+}
+
 // ---- reliability -------------------------------------------------------------------------------------------------
 
 #[test]
@@ -691,3 +738,149 @@ fn real_engine_an_ordinary_clean_file_is_reported_in_scan_history() {
     r.svc.stop();
 }
 
+/// Measurement, not a pass/fail test: how long from "file posted" to "report in Scan History", real engine, local Telegram double
+/// (so no internet latency). Run with: cargo test --release -p sentrix-core --test hosted latency -- --ignored --nocapture
+#[test]
+#[ignore = "measurement; needs real ClamAV"]
+fn latency_posted_file_to_report() {
+    let clam = Arc::new(sentrix_core::clamav::ClamEngine::new(std::env::var_os("SENTRIX_CLAMAV_DIR").expect("SENTRIX_CLAMAV_DIR"), std::env::var_os("SENTRIX_DATA_DIR").expect("SENTRIX_DATA_DIR")));
+    clam.start().expect("clamd");
+    let r = rig_with(Arc::new(Scanner::new(Limits::default(), Some(clam))));
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    std::thread::sleep(Duration::from_secs(3)); // let the link notices drain
+    let mut random = vec![0u8; 6 * 1024 * 1024];
+    let mut x: u64 = 0x9E3779B97F4A7C15;
+    for b in random.iter_mut() {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *b = x as u8;
+    }
+    let zip = make_zip(&[("big.bin", &random)]);
+    let cases: Vec<(&str, Vec<u8>)> = vec![("small.pdf", b"%PDF-1.4 a harmless document
+".repeat(6000)), ("6mb.zip", zip), ("small2.pdf", b"%PDF-1.4 another one
+".repeat(6000))];
+    for (i, (name, bytes)) in cases.into_iter().enumerate() {
+        let before = r.mock.texts_in(H).len();
+        let t = Instant::now();
+        r.mock.add_group_document(n, A, 900 + i as i64, MEMBER, name, bytes.clone(), None);
+        n += 1;
+        let ok = until(60, || r.mock.texts_in(H).len() > before);
+        println!("LATENCY {name} ({} KB): {:.2}s to the report {}", bytes.len() / 1024, t.elapsed().as_secs_f64(), if ok { "" } else { "(TIMED OUT)" });
+    }
+    // Two files at once: does the second wait for the first?
+    let before = r.mock.texts_in(H).len();
+    let t = Instant::now();
+    r.mock.add_group_document(n, A, 950, MEMBER, "a.pdf", b"%PDF-1.4 a
+".repeat(6000), None);
+    r.mock.add_group_document(n + 1, A, 951, MEMBER, "b.pdf", b"%PDF-1.4 b
+".repeat(6000), None);
+    let ok = until(60, || r.mock.texts_in(H).len() >= before + 2);
+    println!("LATENCY two small files posted together: {:.2}s until both reports {}", t.elapsed().as_secs_f64(), if ok { "" } else { "(TIMED OUT)" });
+    r.svc.stop();
+}
+
+/// Where the time goes inside one scan of a 6 MB zip. Measurement only.
+#[test]
+#[ignore = "measurement; needs real ClamAV"]
+fn latency_inside_one_scan() {
+    let clam = Arc::new(sentrix_core::clamav::ClamEngine::new(std::env::var_os("SENTRIX_CLAMAV_DIR").expect("SENTRIX_CLAMAV_DIR"), std::env::var_os("SENTRIX_DATA_DIR").expect("SENTRIX_DATA_DIR")));
+    clam.start().expect("clamd");
+    let scanner = Scanner::new(Limits::default(), Some(clam.clone()));
+    let mut random = vec![0u8; 6 * 1024 * 1024];
+    let mut x: u64 = 0x9E3779B97F4A7C15;
+    for b in random.iter_mut() {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *b = x as u8;
+    }
+    let zip = make_zip(&[("big.bin", &random)]);
+    let dir = tempfile::tempdir().unwrap();
+    let f = dir.path().join("6mb.zip");
+    let t = Instant::now();
+    std::fs::write(&f, &zip).unwrap();
+    println!("TIMING write temp file: {:.2}s", t.elapsed().as_secs_f64());
+    let t = Instant::now();
+    let out = clam.scan_stream(&mut &zip[..], &|| false);
+    println!("TIMING clamd stream of the whole zip: {:.2}s ({:?})", t.elapsed().as_secs_f64(), out.is_ok());
+    for i in 0..2 {
+        let t = Instant::now();
+        let rep = scanner.scan_file(&f, &sentrix_core::ScanOptions { use_cache: false, ..Default::default() });
+        println!("TIMING full scan_file #{i}: {:.2}s verdict {:?}", t.elapsed().as_secs_f64(), rep.verdict);
+        for c in &rep.checks {
+            println!("   check {} {:?}", c.id, c.status);
+        }
+    }
+    let t = Instant::now();
+    let _ = zip.iter().fold(0u64, |a, b| a.wrapping_add(*b as u64));
+    println!("TIMING (baseline) touch every byte: {:.3}s", t.elapsed().as_secs_f64());
+}
+
+/// Which kinds of file are slow inside the engine? Every sample has distinct content, so no cache can answer. Measurement only.
+#[test]
+#[ignore = "measurement; needs real ClamAV"]
+fn latency_by_file_kind() {
+    let clam = Arc::new(sentrix_core::clamav::ClamEngine::new(std::env::var_os("SENTRIX_CLAMAV_DIR").expect("SENTRIX_CLAMAV_DIR"), std::env::var_os("SENTRIX_DATA_DIR").expect("SENTRIX_DATA_DIR")));
+    clam.start().expect("clamd");
+    let rnd = |seed: u64, n: usize| {
+        let mut v = vec![0u8; n];
+        let mut x: u64 = 0x9E3779B97F4A7C15 ^ seed;
+        for b in v.iter_mut() {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            *b = x as u8;
+        }
+        v
+    };
+    let mut time = |label: &str, bytes: Vec<u8>| {
+        let t = Instant::now();
+        let ok = clam.scan_stream(&mut &bytes[..], &|| false).is_ok();
+        println!("KIND {label:<34} {:>6} KB  {:.2}s  ok={ok}", bytes.len() / 1024, t.elapsed().as_secs_f64());
+    };
+    time("warm-up (tiny text)", b"hello warm up
+".to_vec());
+    time("6 MB raw random", rnd(1, 6 << 20));
+    time("6 MB raw random #2", rnd(2, 6 << 20));
+    time("6 MB zip, stored random", make_zip(&[("a.bin", &rnd(3, 6 << 20))]));
+    time("6 MB zip, stored random #2", make_zip(&[("a.bin", &rnd(4, 6 << 20))]));
+    let text: Vec<u8> = (0..400_000).flat_map(|i| format!("line {i} of some ordinary document text
+").into_bytes()).take(6 << 20).collect();
+    time("6 MB of text", text.clone());
+    time("zip of text (compresses well)", make_zip(&[("doc.txt", &text)]));
+    time("170 KB pdf-like", rnd(5, 170 * 1024));
+    time("30 MB raw random", rnd(6, 30 << 20));
+}
+
+/// Which engine setting makes archives slow? Starts the engine once per setting. Measurement only.
+#[test]
+#[ignore = "measurement; needs real ClamAV"]
+fn latency_engine_settings() {
+    let rnd = |seed: u64, n: usize| {
+        let mut v = vec![0u8; n];
+        let mut x: u64 = 0x9E3779B97F4A7C15 ^ seed;
+        for b in v.iter_mut() {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            *b = x as u8;
+        }
+        v
+    };
+    let settings = ["", "ScanArchive no", "ScanPE no;ScanELF no;ScanOLE2 no;ScanPDF no;ScanHTML no;ScanMail no;ScanSWF no;ScanXMLDOCS no;ScanHWP3 no", "Bytecode no", "HeuristicAlerts no", "AlertEncrypted no;AlertExceedsMax no;MaxRecursion 4"];
+    for (k, extra) in settings.iter().enumerate() {
+        std::env::set_var("SENTRIX_CLAMD_EXTRA", extra);
+        let clam = sentrix_core::clamav::ClamEngine::new(std::env::var_os("SENTRIX_CLAMAV_DIR").unwrap(), std::env::var_os("SENTRIX_DATA_DIR").unwrap());
+        clam.start().expect("clamd");
+        let _ = clam.scan_stream(&mut &b"warm"[..], &|| false);
+        let z = make_zip(&[("a.bin", &rnd(100 + k as u64, 6 << 20))]);
+        let t = Instant::now();
+        let ok = clam.scan_stream(&mut &z[..], &|| false).is_ok();
+        println!("SETTING [{extra}] 6 MB stored zip: {:.2}s ok={ok}", t.elapsed().as_secs_f64());
+        clam.stop();
+    }
+    std::env::remove_var("SENTRIX_CLAMD_EXTRA");
+}

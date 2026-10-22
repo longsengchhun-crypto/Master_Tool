@@ -17,7 +17,8 @@ use crate::queue::{now_ms, Group};
 use crate::service::Inner;
 use crate::telegram::{esc, safe_display_name, BotClient, BotInfo, Document, Incoming, MemberChange, MAX_BOT_DOWNLOAD};
 use crate::types::{FindingKind, ScanReport, Verdict};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -40,8 +41,25 @@ pub fn is_history_title(t: &str) -> bool {
     name.eq_ignore_ascii_case(HISTORY_GROUP_NAME) || name.eq_ignore_ascii_case("Scans History")
 }
 
+/// A file at least this big gets a "Checking..." message at once, replaced by the result when it is ready.
+pub const PLACEHOLDER_MIN_BYTES: u64 = 1_000_000;
+
+/// One file posted in a protected group, waiting for a worker.
+pub(crate) struct DocJob {
+    pub bot: Arc<BotClient>,
+    pub me: BotInfo,
+    pub group: Group,
+    pub update: Incoming,
+    pub doc: Document,
+    pub mid: i64,
+}
+
 #[derive(Default)]
 pub(crate) struct GroupState {
+    /// (group, message) pairs queued or being checked, so the same message is never checked twice at once.
+    pub(crate) inflight: Mutex<HashSet<(i64, i64)>>,
+    /// "Checking..." messages waiting to be replaced by the result: (group, message) -> (where it was posted, its id, file name).
+    pub(crate) placeholders: Mutex<HashMap<(i64, i64), (i64, i64, String)>>,
     pub bot_info: Mutex<Option<(BotInfo, Instant)>>,
     msgs: Mutex<HashMap<i64, VecDeque<Instant>>>,
     scans: Mutex<HashMap<i64, VecDeque<Instant>>>,
@@ -198,7 +216,7 @@ impl Inner {
             return;
         }
         if let Some(doc) = &u.document {
-            self.on_document(bot, me, &g, u, doc);
+            self.queue_document(me, &g, u, doc);
         }
         // Photos, videos, audio and stickers are deliberately not scanned (see the module comment).
     }
@@ -214,6 +232,42 @@ impl Inner {
         }
     }
 
+    fn report_body(&self, g: &Group, dest: i64, body: String) -> String {
+        let title: String = g.title.chars().filter(|c| !c.is_control()).take(60).collect();
+        let mut text = format!("<b>Group:</b> {}\n{}", esc(&title), body);
+        // Falling back to the private chat: remind them once per report where reports are meant to go.
+        if self.cfg.read().unwrap().hosted.is_some() && dest > 0 {
+            text += &format!("\n\n<i>Tip: make a group called {HISTORY_GROUP_NAME}, add me to it, and reports will go there instead.</i>");
+        }
+        text
+    }
+
+    /// For a big file, say at once that it is being checked. Only when the result will certainly be posted (so the message is
+    /// always replaced) and only in shared-bot mode, where results go to a separate room.
+    fn start_placeholder(&self, bot: &BotClient, g: &Group, mid: i64, shown: &str, size: u64) {
+        if size < PLACEHOLDER_MIN_BYTES || self.cfg.read().unwrap().hosted.is_none() || !g.report_clean || !g.report_incomplete {
+            return;
+        }
+        let Some(dest) = self.report_dest(g) else { return };
+        if !allow(&self.groups.msgs, dest, MSGS_PER_MIN, Duration::from_secs(60)) {
+            return;
+        }
+        let text = self.report_body(g, dest, format!("<b>{shown}</b>\nChecking this file now. The result will appear here in a moment."));
+        if let Ok(id) = bot.send_reply(dest, &text, None) {
+            if id > 0 {
+                self.groups.placeholders.lock().unwrap().insert((g.chat_id, mid), (dest, id, shown.to_string()));
+            }
+        }
+    }
+
+    /// A worker crashed with a "Checking..." message outstanding: replace it, so it never claims a check is still going.
+    pub(crate) fn settle_placeholder_after_crash(&self, chat: i64, mid: i64) {
+        let taken = self.groups.placeholders.lock().unwrap().remove(&(chat, mid));
+        if let (Some((dest, id, shown)), Some(bot)) = (taken, self.bot.read().unwrap().clone()) {
+            let _ = bot.edit_message_text(dest, id, &format!("<b>{shown}</b>\nThis file <b>could not be checked</b> because of an internal error. It is not known to be safe."));
+        }
+    }
+
     /// Where this person's reports go: their Scan History group if they made one, otherwise their private chat with the bot.
     pub(crate) fn person_dest(&self, user: i64) -> Option<i64> {
         self.store.history_get(user).map(|h| h.0).or_else(|| Some(user).filter(|u| self.store.user_reachable(*u)))
@@ -224,11 +278,17 @@ impl Inner {
             self.event("group_report_undeliverable", "warning", "A scan report could not be sent because the person who protects the group cannot be reached. They need to open the bot and press Start.");
             return false;
         };
-        let title: String = g.title.chars().filter(|c| !c.is_control()).take(60).collect();
-        let mut text = format!("<b>Group:</b> {}\n{}", esc(&title), body);
-        // Falling back to the private chat: remind them once per report where reports are meant to go.
-        if self.cfg.read().unwrap().hosted.is_some() && dest > 0 {
-            text += &format!("\n\n<i>Tip: make a group called {HISTORY_GROUP_NAME}, add me to it, and reports will go there instead.</i>");
+        let text = self.report_body(g, dest, body);
+        // A "Checking..." message for this very file is replaced in place; only if that fails is a new message sent.
+        if let Some(mid) = key.strip_prefix('m').and_then(|k| k.parse::<i64>().ok()) {
+            if let Some((pdest, pid, _)) = self.groups.placeholders.lock().unwrap().remove(&(g.chat_id, mid)) {
+                let bot = self.bot.read().unwrap().clone();
+                if let Some(bot) = bot {
+                    if bot.edit_message_text(pdest, pid, &text).is_ok() {
+                        return true;
+                    }
+                }
+            }
         }
         self.say(dest, None, &format!("r:{}:{key}", g.chat_id), "group_scan", text, urgent)
     }
@@ -550,6 +610,40 @@ impl Inner {
         }
     }
 
+    /// Hand a file to the worker pool and return at once, so the listening thread never waits on a download or a scan.
+    fn queue_document(&self, me: &BotInfo, g: &Group, u: &Incoming, doc: &Document) {
+        let Some(mid) = u.message_id else { return };
+        let Some(bot) = self.bot.read().unwrap().clone() else { return };
+        if !self.groups.inflight.lock().unwrap().insert((g.chat_id, mid)) {
+            return; // already queued or being checked
+        }
+        let job = DocJob { bot, me: me.clone(), group: g.clone(), update: u.clone(), doc: doc.clone(), mid };
+        let tx = self.docs.lock().unwrap().clone();
+        match tx {
+            Some(tx) => {
+                if let Err(e) = tx.try_send(job) {
+                    let job = match e {
+                        std::sync::mpsc::TrySendError::Full(j) | std::sync::mpsc::TrySendError::Disconnected(j) => j,
+                    };
+                    self.groups.inflight.lock().unwrap().remove(&(g.chat_id, mid));
+                    let _ = self.store.group_record_scan(g.chat_id, mid, job.doc.file_unique_id.as_deref(), "", job.doc.file_size.unwrap_or(0), "UNABLE_TO_VERIFY", false, "skipped_busy", None, now_ms());
+                    if g.report_incomplete {
+                        let _ = self.post_report(g, &format!("busy:{mid}"), format!("<b>{}</b> arrived while SENTRIX was busy with many other files. It was <b>not checked</b> and is not known to be safe.", safe_display_name(job.doc.file_name.as_deref().unwrap_or("file"))), false);
+                    }
+                }
+            }
+            // The service is not running its pool (a unit test, or shutting down): do it here.
+            None => {
+                self.run_document(job);
+                self.groups.inflight.lock().unwrap().remove(&(g.chat_id, mid));
+            }
+        }
+    }
+
+    pub(crate) fn run_document(&self, j: DocJob) {
+        self.on_document(&j.bot, &j.me, &j.group, &j.update, &j.doc);
+    }
+
     fn on_document(&self, bot: &BotClient, me: &BotInfo, g: &Group, u: &Incoming, doc: &Document) {
         let chat = g.chat_id;
         let Some(mid) = u.message_id else { return };
@@ -557,6 +651,7 @@ impl Inner {
         if self.store.group_scan_seen(chat, mid).unwrap_or(true) {
             return;
         }
+        let t_start = Instant::now();
         let now = now_ms();
         let name = doc.file_name.clone().unwrap_or_else(|| "file".into());
         let shown = safe_display_name(&name);
@@ -579,6 +674,7 @@ impl Inner {
             let _ = self.store.group_record_scan(chat, mid, uid, "", size, "UNABLE_TO_VERIFY", false, "skipped_size", None, now);
             return incomplete_note("is larger than 20 MB, the most Telegram lets a bot download.".into());
         }
+        self.start_placeholder(bot, g, mid, &shown, size);
         let (path, _) = match bot.get_file(&doc.file_id) {
             Ok(x) => x,
             Err(e) => {
@@ -587,14 +683,21 @@ impl Inner {
             }
         };
         let mut buf: Vec<u8> = Vec::new();
+        let t_download = Instant::now();
         if let Err(e) = bot.download(&path, &mut buf, MAX_BOT_DOWNLOAD) {
             let _ = self.store.group_record_scan(chat, mid, uid, "", size, "UNABLE_TO_VERIFY", false, "unavailable", None, now);
             return incomplete_note(format!("could not be downloaded ({}).", esc(&e.user_message())));
         }
         let title: String = g.title.chars().filter(|c| !c.is_control()).take(60).collect();
         let origin = format!("Telegram group: {title}");
+        let download_ms = t_download.elapsed().as_millis() as u64;
+        let t_scan = Instant::now();
         match self.scan_ephemeral(&origin, &name, &mut buf.as_slice(), MAX_BOT_DOWNLOAD) {
-            Ok(r) => self.finish_document(bot, me, chat, mid, uid, &shown, &r),
+            Ok(r) => {
+                let scan_ms = t_scan.elapsed().as_millis() as u64;
+                self.finish_document(bot, me, chat, mid, uid, &shown, &r);
+                self.hooks.on_group_scan(&crate::service::GroupScanTiming { size: buf.len() as u64, download_ms, scan_ms, total_ms: t_start.elapsed().as_millis() as u64, verdict: verdict_code(r.verdict) });
+            }
             Err(e) => {
                 let _ = self.store.group_record_scan(chat, mid, uid, "", size, "UNABLE_TO_VERIFY", false, "error", None, now);
                 incomplete_note(format!("could not be scanned ({}).", esc(&e)));

@@ -45,3 +45,29 @@ throughput as "order of 100-250 files/s for tiny files", not a benchmark).
 Not measured: live Telegram delivery latency (no bot token), queue behaviour with tens of thousands of pending files,
 memory use of the service over days, CPU use while idle. The queue and outbox are bounded (20 000 jobs / 1 000 pending
 messages), which limits storage growth but was only unit-tested, not stress-tested at those sizes under real scanning.
+
+## Shared bot: posted file to report (measured 2026-10-22)
+
+Same machine as above, **release** build, real ClamAV, a local Telegram test double (so **no internet latency is included**:
+Telegram's download and message delivery are not measured). Run with
+`cargo test --release -p sentrix-core --test hosted latency -- --ignored --nocapture`. Single runs; ClamAV time varies by a second or two.
+
+| File | Before | After |
+|---|---|---|
+| 170 KB PDF, post to report | 1.5 s | **0.4 s** |
+| 6 MB zip of high-entropy data, post to report | 4.5 s | 4.0 s (engine-bound, see below) |
+| Second small file right after the first | about 1.1 s later | no longer waits on a timer |
+
+What was slow, and what changed: the bot waited a full second between listening cycles, reports waited on a 1.5 s timer, and any two
+messages were spaced 1.1 s apart even to different chats. It also checked files inside its listening thread, so one large file
+held up everyone. Now it listens again at once, a pool of three workers checks files, reports leave within about 0.15 s, and
+the 1 message/second limit is applied per chat only.
+
+What did **not** get faster, and why: ClamAV itself took about 3 s for a 6 MB archive whose contents are high-entropy (30 MB of
+plain data takes 0.7 s). Turning off archive scanning, bytecode, heuristics or type scanning did not change that, so it is not a
+setting we can tune away. Typical documents and compressible archives are far faster (a 379 KB zip of text: 0.13 s). A file
+already seen is answered from ClamAV's own cache in about 0.02 s.
+
+For files of 1 MB or more the bot now posts "Checking this file now" in Scan History immediately and replaces it with the result,
+so the wait is visible. The bot also logs `[time] size: download, check, total` for every file so real delays can be measured on a
+real connection.

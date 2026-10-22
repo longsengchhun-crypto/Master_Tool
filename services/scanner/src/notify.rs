@@ -158,11 +158,9 @@ pub fn deliver_due_at(store: &JobStore, client: &dyn Courier, chat_id: i64, max:
         Ok(v) => v,
         Err(_) => return d,
     };
-    for (i, n) in due.iter().enumerate() {
-        if i > 0 && !min_gap.is_zero() {
-            std::thread::sleep(min_gap);
-        }
+    for n in due.iter() {
         let target = n.chat_id.unwrap_or(chat_id);
+        pace(target, min_gap);
         match client.send_reply(target, &n.text, n.reply_to) {
             Ok(_) => {
                 let _ = store.notification_sent(&n.id, now);
@@ -202,6 +200,31 @@ pub fn deliver_due_at(store: &JobStore, client: &dyn Courier, chat_id: i64, max:
         }
     }
     d
+}
+
+/// Telegram allows about one message a second to one chat, but many chats in parallel. Wait only as long as this chat needs,
+/// never because some other chat was just written to.
+fn pace(chat: i64, gap: Duration) {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
+    static LAST: OnceLock<Mutex<HashMap<i64, Instant>>> = OnceLock::new();
+    if gap.is_zero() {
+        return;
+    }
+    let map = LAST.get_or_init(|| Mutex::new(HashMap::new()));
+    let wait = {
+        let m = map.lock().unwrap();
+        m.get(&chat).map(|t| gap.saturating_sub(t.elapsed())).unwrap_or_default()
+    };
+    if !wait.is_zero() {
+        std::thread::sleep(wait);
+    }
+    let mut m = map.lock().unwrap();
+    m.insert(chat, Instant::now());
+    if m.len() > 4096 {
+        m.retain(|_, t| t.elapsed() < Duration::from_secs(60));
+    }
 }
 
 /// Count of check gaps, used by callers deciding whether a "could not verify" message is warranted.

@@ -132,6 +132,8 @@ fn report_is_for_administrators_only_counts_only_and_never_mixes_groups() {
     protect(&r, A, ADMIN_A, 1);
     let n = protect(&r, B, ADMIN_B, 50) + 10;
     r.store.group_record_scan(B, 900, Some("uniq"), "ab", 5, "MALICIOUS", true, "scanned", None, now_ms()).unwrap();
+    // Let the replies to the two /setup commands leave first: delivery is fast now, so the count must be taken after them.
+    std::thread::sleep(Duration::from_secs(2));
     let before = r.mock.texts_in(A).len();
     // A member is refused.
     r.mock.add_group_text(n, A, 20, MEMBER, "/report");
