@@ -49,6 +49,7 @@ export const api = {
   tgAccountConnect: () => invoke<TgAccount>('tg_account_connect'),
   tgAccountDisconnect: () => invoke<TgAccount>('tg_account_disconnect'),
   tgAccountSetOptions: (options: AccountOptions) => invoke<TgAccount>('tg_account_set_options', { options }),
+  tgAccountSetRoute: (chatId: number, room: number | null) => invoke<TgAccount>('tg_account_set_route', { chatId, room }),
   tgGroupLeave: (id: number) => invoke<TelegramStatus>('tg_group_leave', { id }),
   checkUpdate: () => invoke<UpdateInfo>('check_update'),
   installUpdate: () => invoke<void>('install_update'),

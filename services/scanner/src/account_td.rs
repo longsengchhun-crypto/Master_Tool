@@ -12,6 +12,7 @@
 //!
 //! The TDLib database is encrypted with a random key that exists only DPAPI-protected on this PC (`SessionVault`).
 
+use crate::account_route::{report_text, room_welcome, Routing, MAX_ROOMS};
 use crate::account::{unverified_report, AccountPrefs, AttachmentGate, ChatKind, IncomingAttachment, IngestError, SessionVault};
 use crate::queue::{now_ms, JobStore};
 use crate::service::ProtectionService;
@@ -23,7 +24,7 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -77,6 +78,23 @@ pub struct Recent {
     pub note: String,
 }
 
+/// A group the person is in, and the Scan History group its results go to (`None`: all of them).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupRow {
+    pub chat_id: i64,
+    pub title: String,
+    pub route: Option<i64>,
+}
+
+/// One of the person's Scan History groups. They all have the same name, so each gets a number.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomRow {
+    pub chat_id: i64,
+    pub num: i64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountView {
@@ -96,11 +114,13 @@ pub struct AccountView {
     pub pending: usize,
     pub counts: Counts,
     pub recent: Vec<Recent>,
+    pub groups: Vec<GroupRow>,
+    pub rooms: Vec<RoomRow>,
 }
 
 impl AccountView {
     pub fn new(link: LinkState) -> Self {
-        AccountView { link, qr_svg: None, login_link: None, display: None, connection: "unknown".into(), last_sync_at: None, last_scan_at: None, pending: 0, counts: Counts::default(), recent: vec![] }
+        AccountView { link, qr_svg: None, login_link: None, display: None, connection: "unknown".into(), last_sync_at: None, last_scan_at: None, pending: 0, counts: Counts::default(), recent: vec![], groups: vec![], rooms: vec![] }
     }
 }
 
@@ -147,11 +167,13 @@ pub struct AccountOptions {
     /// Also look at photos, videos, audio and voice messages. Off by default: documents (where executables, scripts and
     /// archives arrive) are the risky category and media would multiply the download volume.
     pub media: bool,
+    /// Post the result of each check into the person's Scan History group (or Saved Messages) from their own account.
+    pub local_reports: bool,
 }
 
 impl Default for AccountOptions {
     fn default() -> Self {
-        AccountOptions { enabled: true, prefs: AccountPrefs::default(), media: false }
+        AccountOptions { enabled: true, prefs: AccountPrefs::default(), media: false, local_reports: true }
     }
 }
 
@@ -181,6 +203,7 @@ struct Parked {
 }
 
 struct Pending {
+    chat: i64,
     name: String,
     kind: ChatKind,
     size: u64,
@@ -190,6 +213,7 @@ struct Pending {
 }
 
 struct Job {
+    chat: i64,
     file_id: i64,
     path: PathBuf,
     name: String,
@@ -209,7 +233,18 @@ pub struct Shared {
     downloading: AtomicUsize,
     queued: AtomicUsize,
     seen: Mutex<(HashSet<String>, VecDeque<String>)>,
+    /// Where results are posted (see account_route.rs).
+    pub routing: Mutex<Routing>,
+    /// Scan History number per group, kept across restarts.
+    nums: Mutex<HashMap<i64, i64>>,
+    /// Messages waiting to be posted. Posted one at a time, a little apart, so Telegram never sees a burst.
+    outbox: Mutex<VecDeque<(i64, String)>>,
+    post_gap_ms: AtomicU64,
 }
+
+const ROOMS_KEY: &str = "tg_acct_rooms";
+const ROUTES_KEY: &str = "tg_acct_routes";
+const OUTBOX_MAX: usize = 200;
 
 impl Shared {
     pub fn new(store: Arc<JobStore>, scanner: Arc<dyn AttachmentScanner>, on_change: Box<dyn Fn() + Send + Sync>, options: AccountOptions, initial: LinkState) -> Arc<Self> {
@@ -222,7 +257,140 @@ impl Shared {
             order.pop_front();
         }
         let set = order.iter().cloned().collect();
-        Arc::new(Shared { view: Mutex::new(v), store, scanner, on_change, options: RwLock::new(options), downloading: AtomicUsize::new(0), queued: AtomicUsize::new(0), seen: Mutex::new((set, order)) })
+        let nums: HashMap<i64, i64> = store.kv_get(ROOMS_KEY).and_then(|s| serde_json::from_str::<HashMap<String, i64>>(&s).ok()).map(|m| m.into_iter().filter_map(|(k, n)| k.parse().ok().map(|k| (k, n))).collect()).unwrap_or_default();
+        let routes: HashMap<i64, i64> = store.kv_get(ROUTES_KEY).and_then(|s| serde_json::from_str::<HashMap<String, i64>>(&s).ok()).map(|m| m.into_iter().filter_map(|(k, n)| k.parse().ok().map(|k| (k, n))).collect()).unwrap_or_default();
+        let routing = Routing { routes, ..Default::default() };
+        Arc::new(Shared {
+            view: Mutex::new(v),
+            store,
+            scanner,
+            on_change,
+            options: RwLock::new(options),
+            downloading: AtomicUsize::new(0),
+            queued: AtomicUsize::new(0),
+            seen: Mutex::new((set, order)),
+            routing: Mutex::new(routing),
+            nums: Mutex::new(nums),
+            outbox: Mutex::new(VecDeque::new()),
+            post_gap_ms: AtomicU64::new(1200),
+        })
+    }
+
+    // ---- results posted from the person's own account --------------------------------------------------------------
+
+    /// A chat became known or was renamed. A group called "Scan History" becomes a results room; other groups become
+    /// something the person can point at a room.
+    fn note_chat(&self, id: i64, title: &str, is_group: bool) {
+        let title: String = title.chars().filter(|c| !c.is_control() && !crate::telegram::is_deceptive(*c)).take(80).collect();
+        let (changed, new_room) = {
+            let mut r = self.routing.lock().unwrap();
+            let (was_room, prev) = (r.rooms.contains(&id), r.groups.get(&id).cloned());
+            let mut new_room = false;
+            if is_group && crate::group::is_history_title(&title) {
+                r.groups.remove(&id);
+                if !was_room && r.rooms.len() < MAX_ROOMS {
+                    r.rooms.insert(id);
+                    new_room = true;
+                }
+            } else {
+                r.rooms.remove(&id);
+                if is_group {
+                    r.groups.insert(id, title.clone());
+                } else {
+                    r.groups.remove(&id);
+                }
+            }
+            (was_room != r.rooms.contains(&id) || prev != r.groups.get(&id).cloned(), new_room)
+        };
+        if new_room {
+            // Number it the first time ever seen, and say what it is in the room itself.
+            let (num, fresh) = {
+                let mut n = self.nums.lock().unwrap();
+                let next = n.values().max().copied().unwrap_or(0) + 1;
+                let fresh = !n.contains_key(&id);
+                let num = *n.entry(id).or_insert(next);
+                if fresh {
+                    let m: HashMap<String, i64> = n.iter().map(|(k, v)| (k.to_string(), *v)).collect();
+                    self.store.kv_set(ROOMS_KEY, &serde_json::to_string(&m).unwrap_or_default());
+                }
+                (num, fresh)
+            };
+            if fresh && self.options.read().unwrap().local_reports {
+                self.queue_post(id, room_welcome(num));
+            }
+        }
+        if changed {
+            self.refresh_lists();
+        }
+    }
+
+    fn refresh_lists(&self) {
+        let (mut groups, rooms) = {
+            let r = self.routing.lock().unwrap();
+            let groups: Vec<GroupRow> = r.groups.iter().map(|(id, t)| GroupRow { chat_id: *id, title: t.clone(), route: r.routes.get(id).copied().filter(|x| r.rooms.contains(x)) }).collect();
+            let n = self.nums.lock().unwrap();
+            let rooms: Vec<RoomRow> = r.rooms.iter().map(|id| RoomRow { chat_id: *id, num: n.get(id).copied().unwrap_or(0) }).collect();
+            (groups, rooms)
+        };
+        groups.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()).then(a.chat_id.cmp(&b.chat_id)));
+        groups.truncate(300);
+        let mut rooms = rooms;
+        rooms.sort_by_key(|r| r.num);
+        self.update(|v| {
+            v.groups = groups;
+            v.rooms = rooms;
+        });
+    }
+
+    /// Point a protected group at one Scan History group, or (`None`) at all of them.
+    pub fn set_route(&self, chat: i64, room: Option<i64>) {
+        {
+            let mut r = self.routing.lock().unwrap();
+            match room {
+                Some(x) if r.rooms.contains(&x) => {
+                    r.routes.insert(chat, x);
+                }
+                Some(_) => return,
+                None => {
+                    r.routes.remove(&chat);
+                }
+            }
+            let m: HashMap<String, i64> = r.routes.iter().map(|(k, v)| (k.to_string(), *v)).collect();
+            self.store.kv_set(ROUTES_KEY, &serde_json::to_string(&m).unwrap_or_default());
+        }
+        self.refresh_lists();
+    }
+
+    fn queue_post(&self, dest: i64, text: String) {
+        let mut q = self.outbox.lock().unwrap();
+        if q.len() >= OUTBOX_MAX {
+            q.pop_front();
+            self.store.add_event("telegram_account_post_dropped", "warning", "Too many results were waiting to be posted to Telegram; the oldest was dropped.", now_ms());
+        }
+        q.push_back((dest, text));
+    }
+
+    /// Queue the result of one check for the person's Scan History group(s), or Saved Messages.
+    fn deliver(&self, chat: i64, kind: ChatKind, r: &ScanReport) {
+        if !self.options.read().unwrap().local_reports {
+            return;
+        }
+        let (dests, source) = {
+            let rt = self.routing.lock().unwrap();
+            let source = match kind {
+                ChatKind::Private => "a private chat".to_string(),
+                ChatKind::Channel => "a channel".to_string(),
+                ChatKind::Group => rt.groups.get(&chat).map(|t| format!("group \"{t}\"")).unwrap_or_else(|| "a group".to_string()),
+            };
+            (rt.destinations(chat, r.verdict == Verdict::Clean), source)
+        };
+        if dests.is_empty() {
+            return;
+        }
+        let text = report_text(r, &source);
+        for d in dests {
+            self.queue_post(d, text.clone());
+        }
     }
 
     pub fn snapshot(&self) -> AccountView {
@@ -291,10 +459,11 @@ impl Shared {
     }
 
     /// A file we will not or cannot check: counted, recorded and (through the normal report path) shown as UNABLE TO VERIFY.
-    fn unverified(&self, kind: ChatKind, name: &str, size: u64, reason: &str) {
+    fn unverified(&self, kind: ChatKind, chat: i64, name: &str, size: u64, reason: &str) {
         let origin = crate::account::origin_for(kind);
         let r = unverified_report(origin, name, size, reason);
         self.scanner.publish(&r);
+        self.deliver(chat, kind, &r);
         self.update(|v| v.counts.inaccessible += 1);
         self.save_counts();
         self.push_recent(Recent { at: now_ms(), name: r.file.name.clone(), kind: kind_label(kind), verdict: Verdict::UnableToVerify.label().into(), note: reason.into() });
@@ -330,11 +499,12 @@ pub struct Engine {
     pending: HashMap<i64, Pending>,
     exit: Option<Exit>,
     closed: bool,
+    last_post: Option<Instant>,
 }
 
 impl Engine {
     fn new(io: Arc<dyn TdIo>, shared: Arc<Shared>, creds: Credentials, dir: PathBuf, key: Vec<u8>, resume: bool, jobs: SyncSender<Job>) -> Self {
-        Engine { io, shared, creds, dir, key, resume, jobs, chats: HashMap::new(), parked: HashMap::new(), pending: HashMap::new(), exit: None, closed: false }
+        Engine { io, shared, creds, dir, key, resume, jobs, chats: HashMap::new(), parked: HashMap::new(), pending: HashMap::new(), exit: None, closed: false, last_post: None }
     }
 
     fn send(&self, v: Value) {
@@ -352,12 +522,29 @@ impl Engine {
             "updateAuthorizationState" => self.on_auth(&v["authorization_state"]),
             "updateConnectionState" => self.on_connection(&v["state"]),
             "updateNewChat" => self.on_chat(&v["chat"]),
+            "updateChatTitle" => {
+                if let (Some(id), Some(t)) = (v["chat_id"].as_i64(), v["title"].as_str()) {
+                    let is_group = matches!(self.chats.get(&id), Some((Some(ChatKind::Group), _)));
+                    self.shared.note_chat(id, t, is_group);
+                }
+            }
+            // The answer to the search for Scan History groups: ask for each one we do not know yet.
+            "chats" if v["@extra"] == "rooms" => {
+                for id in v["chat_ids"].as_array().into_iter().flatten().filter_map(Value::as_i64) {
+                    if !self.chats.contains_key(&id) {
+                        self.send(json!({"@type": "getChat", "chat_id": id}));
+                    }
+                }
+            }
             "chat" => self.on_chat(v),
             "updateNewMessage" => self.on_message(&v["message"]),
             "updateFile" => self.on_file(&v["file"]),
             // The reply to downloadFile is the file itself. A file that is already complete locally gets no later updateFile.
             "file" if v["@extra"].as_str().map(|x| x.starts_with("dl:")).unwrap_or(false) => self.on_file(v),
             "user" if v["@extra"] == "me" => {
+                if let Some(id) = v["id"].as_i64() {
+                    self.shared.routing.lock().unwrap().me = Some(id);
+                }
                 let first: String = v["first_name"].as_str().unwrap_or("").chars().filter(|c| !c.is_control()).take(40).collect();
                 self.shared.update(|s| s.display = Some(if first.is_empty() { "Your account".into() } else { first }));
             }
@@ -429,6 +616,11 @@ impl Engine {
                     v.login_link = None;
                 });
                 self.send(json!({"@type": "getMe", "@extra": "me"}));
+                // Find the person's groups and any Scan History group they made, so results have somewhere to go.
+                self.send(json!({"@type": "loadChats", "chat_list": {"@type": "chatListMain"}, "limit": 200}));
+                for q in ["Scan History", "Scans History"] {
+                    self.send(json!({"@type": "searchChatsOnServer", "query": q, "limit": 25, "@extra": "rooms"}));
+                }
             }
             "authorizationStateLoggingOut" | "authorizationStateClosing" => {}
             "authorizationStateClosed" => {
@@ -490,6 +682,9 @@ impl Engine {
             _ => None, // secret chats or anything unknown: not supported
         };
         self.chats.insert(id, (kind, chat["has_protected_content"].as_bool().unwrap_or(false)));
+        if let Some(t) = chat["title"].as_str() {
+            self.shared.note_chat(id, t, matches!(kind, Some(ChatKind::Group)));
+        }
         if let Some(waiting) = self.parked.remove(&id) {
             for p in waiting {
                 self.on_message(&p.msg);
@@ -502,6 +697,10 @@ impl Engine {
             return;
         }
         let (Some(chat_id), Some(msg_id)) = (m["chat_id"].as_i64(), m["id"].as_i64()) else { return };
+        // A Scan History group holds results, not files to check.
+        if self.shared.routing.lock().unwrap().rooms.contains(&chat_id) {
+            return;
+        }
         let opts = *self.shared.options.read().unwrap();
         let Some((file, name, is_media)) = extract(&m["content"]) else { return };
         if !opts.enabled {
@@ -545,19 +744,19 @@ impl Engine {
         }
         if protected || m["can_be_saved"].as_bool() == Some(false) {
             self.shared.mark_seen(&message_key);
-            self.shared.unverified(kind, &name, size, "Telegram marks this content as protected. SENTRIX does not work around that, so it was not downloaded or checked.");
+            self.shared.unverified(kind, chat_id, &name, size, "Telegram marks this content as protected. SENTRIX does not work around that, so it was not downloaded or checked.");
             return;
         }
         if size > opts.prefs.max_bytes {
             self.shared.mark_seen(&message_key);
-            self.shared.unverified(kind, &name, size, &format!("The file is {} MB, above the {} MB limit, so it was not downloaded or checked.", size / 1_000_000, opts.prefs.max_bytes / 1_000_000));
+            self.shared.unverified(kind, chat_id, &name, size, &format!("The file is {} MB, above the {} MB limit, so it was not downloaded or checked.", size / 1_000_000, opts.prefs.max_bytes / 1_000_000));
             return;
         }
         if self.pending.len() >= MAX_IN_FLIGHT_DOWNLOADS {
-            self.shared.unverified(kind, &name, size, "SENTRIX was busy with other files and did not download this one.");
+            self.shared.unverified(kind, chat_id, &name, size, "SENTRIX was busy with other files and did not download this one.");
             return;
         }
-        self.pending.insert(file_id, Pending { name, kind, size, unique_id, message_key, started: Instant::now() });
+        self.pending.insert(file_id, Pending { chat: chat_id, name, kind, size, unique_id, message_key, started: Instant::now() });
         self.shared.set_downloading(self.pending.len());
         self.send(json!({"@type": "downloadFile", "file_id": file_id, "priority": 8, "offset": 0, "limit": 0, "synchronous": false, "@extra": format!("dl:{file_id}")}));
         // The file may already be complete locally (TDLib returns it immediately as an updateFile).
@@ -579,10 +778,10 @@ impl Engine {
         if p.size > 0 && on_disk != p.size {
             self.release(id, &path);
             self.shared.set_downloading(self.pending.len());
-            self.shared.unverified(p.kind, &p.name, p.size, "The download did not finish completely, so the file could not be checked.");
+            self.shared.unverified(p.kind, p.chat, &p.name, p.size, "The download did not finish completely, so the file could not be checked.");
             return;
         }
-        let job = Job { file_id: id, path: path.clone(), name: p.name.clone(), kind: p.kind, size: p.size, unique_id: p.unique_id.clone(), message_key: p.message_key.clone() };
+        let job = Job { chat: p.chat, file_id: id, path: path.clone(), name: p.name.clone(), kind: p.kind, size: p.size, unique_id: p.unique_id.clone(), message_key: p.message_key.clone() };
         self.shared.queued_delta(true);
         self.shared.set_downloading(self.pending.len());
         match self.jobs.try_send(job) {
@@ -590,7 +789,7 @@ impl Engine {
             Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
                 self.shared.queued_delta(false);
                 self.release(id, &path);
-                self.shared.unverified(p.kind, &p.name, p.size, "SENTRIX was busy checking other files and did not check this one.");
+                self.shared.unverified(p.kind, p.chat, &p.name, p.size, "SENTRIX was busy checking other files and did not check this one.");
             }
         }
     }
@@ -614,8 +813,13 @@ impl Engine {
                 self.shared.set_downloading(self.pending.len());
                 // Message text is Telegram's; it is shown to the user but not stored beyond the event log.
                 let msg: String = v["message"].as_str().unwrap_or("download failed").chars().filter(|c| !c.is_control()).take(120).collect();
-                self.shared.unverified(p.kind, &p.name, p.size, &format!("Telegram would not provide this file ({msg}). It may have expired or be restricted."));
+                self.shared.unverified(p.kind, p.chat, &p.name, p.size, &format!("Telegram would not provide this file ({msg}). It may have expired or be restricted."));
             }
+        }
+        if extra.starts_with("rpt:") {
+            // A result could not be posted (no permission in that group, Telegram asked us to slow down). Say so, once per error.
+            let msg: String = v["message"].as_str().unwrap_or("not sent").chars().filter(|c| !c.is_control()).take(120).collect();
+            self.shared.store.add_event("telegram_account_post_failed", "warning", &format!("A result could not be posted to Telegram: {msg}"), now_ms());
         }
         if extra.is_empty() && v["code"].as_i64() == Some(401) {
             // Unauthorized: the session is no longer valid.
@@ -630,6 +834,31 @@ impl Engine {
         remove_inside(&self.dir.join("files"), path);
     }
 
+    /// Post at most one waiting result, and not more often than every `post_gap_ms`.
+    fn pump(&mut self) {
+        let gap = Duration::from_millis(self.shared.post_gap_ms.load(Ordering::Relaxed));
+        if self.last_post.is_some_and(|t| t.elapsed() < gap) || self.exit.is_some() {
+            return;
+        }
+        let Some((dest, text)) = self.shared.outbox.lock().unwrap().pop_front() else { return };
+        if self.shared.routing.lock().unwrap().me == Some(dest) {
+            // Saved Messages is the person's chat with themselves: make sure TDLib has it open.
+            self.send(json!({"@type": "createPrivateChat", "user_id": dest, "force": false}));
+        }
+        self.send(json!({
+            "@type": "sendMessage",
+            "chat_id": dest,
+            "input_message_content": {
+                "@type": "inputMessageText",
+                "text": {"@type": "formattedText", "text": text, "entities": []},
+                "link_preview_options": {"@type": "linkPreviewOptions", "is_disabled": true},
+                "clear_draft": false
+            },
+            "@extra": format!("rpt:{dest}")
+        }));
+        self.last_post = Some(Instant::now());
+    }
+
     /// Housekeeping when nothing arrived for a moment.
     fn tick(&mut self) {
         let stalled: Vec<i64> = self.pending.iter().filter(|(_, p)| p.started.elapsed() > DOWNLOAD_STALL).map(|(id, _)| *id).collect();
@@ -637,7 +866,7 @@ impl Engine {
             if let Some(p) = self.pending.remove(&id) {
                 self.release(id, Path::new(""));
                 self.shared.set_downloading(self.pending.len());
-                self.shared.unverified(p.kind, &p.name, p.size, "The download stalled and never completed, so the file could not be checked.");
+                self.shared.unverified(p.kind, p.chat, &p.name, p.size, "The download stalled and never completed, so the file could not be checked.");
             }
         }
     }
@@ -726,6 +955,7 @@ fn scan_loop(rx: Receiver<Job>, shared: Arc<Shared>, io: Arc<dyn TdIo>, files_di
                 shared.queued_delta(false);
                 shared.save_counts();
                 shared.push_recent(Recent { at: now_ms(), name: r.file.name.clone(), kind: kind_label(job.kind), verdict: r.verdict.label().into(), note: r.summary.chars().take(160).collect() });
+                shared.deliver(job.chat, job.kind, &r);
                 // `scan` already published the report (history, desktop notice, bot message per the user's preferences).
             }
             Err(e) => {
@@ -736,7 +966,7 @@ fn scan_loop(rx: Receiver<Job>, shared: Arc<Shared>, io: Arc<dyn TdIo>, files_di
                     IngestError::Busy => "SENTRIX was busy checking other files".to_string(),
                     IngestError::Scan(s) => s,
                 };
-                shared.unverified(job.kind, &job.name, job.size, &format!("The check could not be completed: {why}."));
+                shared.unverified(job.kind, job.chat, &job.name, job.size, &format!("The check could not be completed: {why}."));
             }
         }
     }
@@ -957,6 +1187,7 @@ fn run(mut e: Engine, io: &Arc<dyn TdIo>, ctl: &AtomicU8) -> Exit {
         if e.exit.is_some() && asked.is_none() {
             asked = Some(Instant::now());
         }
+        e.pump();
         match io.receive(0.5) {
             Some(s) => e.handle_str(&s),
             None => e.tick(),
@@ -1197,7 +1428,7 @@ mod tests {
 
     #[test]
     fn groups_work_when_the_user_turns_them_on() {
-        let o = AccountOptions { enabled: true, prefs: AccountPrefs { groups: true, ..AccountPrefs::default() }, media: false };
+        let o = AccountOptions { enabled: true, prefs: AccountPrefs { groups: true, ..AccountPrefs::default() }, ..AccountOptions::default() };
         let (mut e, fake, _s, _sh, _d, _rx) = rig(o, true);
         e.handle(&chat(20, json!({"@type": "chatTypeBasicGroup", "basic_group_id": 3}), false));
         e.handle(&doc_msg(20, 1, 1, "a.exe", 10, "A"));
@@ -1235,7 +1466,7 @@ mod tests {
 
     #[test]
     fn oversize_files_are_not_downloaded_and_are_reported() {
-        let o = AccountOptions { enabled: true, prefs: AccountPrefs { max_bytes: 100, ..AccountPrefs::default() }, media: false };
+        let o = AccountOptions { enabled: true, prefs: AccountPrefs { max_bytes: 100, ..AccountPrefs::default() }, ..AccountOptions::default() };
         let (mut e, fake, scan, _sh, _d, _rx) = rig(o, true);
         e.handle(&chat(10, private(), false));
         e.handle(&doc_msg(10, 1, 5, "huge.iso", 5_000_000_000, "H"));
@@ -1355,6 +1586,207 @@ mod tests {
         e.handle(&doc_msg(10, 9, 5, "again.zip", 10, "SAME"));
         assert_eq!(fake.count("downloadFile"), 0);
         assert_eq!(shared.snapshot().counts.skipped, 1);
+    }
+
+    // ---- results posted from the person's own account ------------------------------------------------------------
+
+    fn group_chat(id: i64, title: &str) -> Value {
+        json!({"@type": "updateNewChat", "chat": {"id": id, "type": {"@type": "chatTypeSupergroup", "supergroup_id": 1, "is_channel": false}, "title": title}})
+    }
+
+    fn posts(fake: &Fake) -> Vec<(i64, String)> {
+        fake.sent.lock().unwrap().iter().filter(|v| v["@type"] == "sendMessage").map(|v| (v["chat_id"].as_i64().unwrap(), v["input_message_content"]["text"]["text"].as_str().unwrap().to_string())).collect()
+    }
+
+    fn report(name: &str, v: Verdict) -> ScanReport {
+        let mut r = unverified_report("Telegram group", name, 10, "x");
+        r.verdict = v;
+        r.complete = true;
+        r.summary = format!("{name} checked");
+        r
+    }
+
+    fn quick(shared: &Arc<Shared>) {
+        shared.post_gap_ms.store(0, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn signing_in_looks_for_the_persons_groups_and_any_scan_history_group() {
+        let (mut e, fake, _s, _sh, _d, _rx) = rig(AccountOptions::default(), true);
+        e.handle(&auth("authorizationStateReady"));
+        assert_eq!(fake.count("loadChats"), 1);
+        let q: Vec<String> = fake.sent.lock().unwrap().iter().filter(|v| v["@type"] == "searchChatsOnServer").map(|v| v["query"].as_str().unwrap().to_string()).collect();
+        assert_eq!(q, vec!["Scan History", "Scans History"]);
+        // The search answer names chats we have not loaded: ask for each, once.
+        e.handle(&json!({"@type": "chats", "@extra": "rooms", "chat_ids": [-1005, -1006]}));
+        e.handle(&group_chat(-1005, "Scan History"));
+        e.handle(&json!({"@type": "chats", "@extra": "rooms", "chat_ids": [-1005, -1006]}));
+        assert_eq!(fake.sent.lock().unwrap().iter().filter(|v| v["@type"] == "getChat" && v["chat_id"] == -1006).count(), 2);
+        assert_eq!(fake.sent.lock().unwrap().iter().filter(|v| v["@type"] == "getChat" && v["chat_id"] == -1005).count(), 1, "a known chat is not asked for again");
+    }
+
+    #[test]
+    fn a_group_called_scan_history_becomes_a_numbered_results_room_and_introduces_itself_once() {
+        let (mut e, fake, _s, shared, _d, _rx) = rig(AccountOptions::default(), true);
+        quick(&shared);
+        e.handle(&group_chat(-1001, "Design team"));
+        e.handle(&group_chat(-1002, "Scan History"));
+        e.handle(&group_chat(-1003, "scans history"));
+        e.handle(&group_chat(-1004, "Scan History 2"));
+        let v = shared.snapshot();
+        assert_eq!(v.rooms, vec![RoomRow { chat_id: -1002, num: 1 }, RoomRow { chat_id: -1003, num: 2 }], "numbers tell identical names apart");
+        assert_eq!(v.groups.iter().map(|g| g.chat_id).collect::<Vec<_>>(), vec![-1001, -1004], "rooms are not protected groups");
+        for _ in 0..3 {
+            e.pump();
+        }
+        let p = posts(&fake);
+        assert_eq!(p.len(), 2);
+        assert!(p[0].1.starts_with("SENTRIX Scan History #1") && p[0].0 == -1002);
+        assert!(p[1].1.starts_with("SENTRIX Scan History #2") && p[1].0 == -1003);
+        // Seen again (restart, rename back and forth): same number, no second introduction.
+        e.handle(&group_chat(-1002, "Scan History"));
+        e.pump();
+        assert_eq!(posts(&fake).len(), 2);
+        let again = Shared::new(shared.store.clone(), shared.scanner.clone(), Box::new(|| {}), AccountOptions::default(), LinkState::Disconnected);
+        assert_eq!(*again.nums.lock().unwrap().get(&-1003).unwrap(), 2, "numbers survive a restart");
+    }
+
+    #[test]
+    fn a_renamed_room_stops_being_a_room() {
+        let (mut e, _f, _s, shared, _d, _rx) = rig(AccountOptions::default(), true);
+        e.handle(&group_chat(-1002, "Scan History"));
+        assert_eq!(shared.snapshot().rooms.len(), 1);
+        e.handle(&json!({"@type": "updateChatTitle", "chat_id": -1002, "title": "Holiday photos"}));
+        let v = shared.snapshot();
+        assert!(v.rooms.is_empty() && v.groups.iter().any(|g| g.chat_id == -1002));
+    }
+
+    #[test]
+    fn results_go_to_the_scan_history_group_clean_ones_too_and_a_choice_is_respected() {
+        let (mut e, fake, _s, shared, _d, _rx) = rig(AccountOptions::default(), true);
+        quick(&shared);
+        e.handle(&json!({"@type": "user", "@extra": "me", "id": 5, "first_name": "Sam"}));
+        e.handle(&group_chat(-1001, "Design team"));
+        e.handle(&group_chat(-1002, "Scan History"));
+        e.handle(&group_chat(-1003, "Scan History"));
+        for _ in 0..4 {
+            e.pump();
+        }
+        let intro = posts(&fake).len();
+        shared.deliver(-1001, ChatKind::Group, &report("a.pdf", Verdict::Clean));
+        for _ in 0..4 {
+            e.pump();
+        }
+        let p = posts(&fake);
+        let fresh: Vec<_> = p[intro..].iter().collect();
+        assert_eq!(fresh.len(), 2, "no choice yet: every room gets it, clean included");
+        assert!(fresh.iter().all(|(c, t)| *c != 5 && t.contains("group \"Design team\"") && t.contains("a.pdf")), "{fresh:?}");
+        // The person picks room 2 for this group.
+        shared.set_route(-1001, Some(-1003));
+        assert_eq!(shared.snapshot().groups[0].route, Some(-1003));
+        shared.deliver(-1001, ChatKind::Group, &report("b.pdf", Verdict::Suspicious));
+        for _ in 0..3 {
+            e.pump();
+        }
+        let p = posts(&fake);
+        let b: Vec<_> = p.iter().filter(|(_, t)| t.contains("b.pdf")).collect();
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0].0, -1003);
+        // A choice for a room that does not exist is refused; clearing it restores "all".
+        shared.set_route(-1001, Some(-9999));
+        assert_eq!(shared.snapshot().groups[0].route, Some(-1003));
+        shared.set_route(-1001, None);
+        assert_eq!(shared.snapshot().groups[0].route, None);
+        // The choice survives a restart.
+        shared.set_route(-1001, Some(-1002));
+        let again = Shared::new(shared.store.clone(), shared.scanner.clone(), Box::new(|| {}), AccountOptions::default(), LinkState::Disconnected);
+        assert_eq!(again.routing.lock().unwrap().routes.get(&-1001), Some(&-1002));
+    }
+
+    #[test]
+    fn without_a_scan_history_group_only_dangerous_results_reach_saved_messages() {
+        let (mut e, fake, _s, shared, _d, _rx) = rig(AccountOptions::default(), true);
+        quick(&shared);
+        e.handle(&json!({"@type": "user", "@extra": "me", "id": 5, "first_name": "Sam"}));
+        shared.deliver(10, ChatKind::Private, &report("fine.pdf", Verdict::Clean));
+        shared.deliver(10, ChatKind::Private, &report("evil.exe", Verdict::Malicious));
+        for _ in 0..3 {
+            e.pump();
+        }
+        let p = posts(&fake);
+        assert_eq!(p.len(), 1, "{p:?}");
+        assert_eq!(p[0].0, 5);
+        assert!(p[0].1.contains("MALICIOUS") && p[0].1.contains("Do not open it."));
+        assert!(fake.count("createPrivateChat") >= 1, "Saved Messages is opened before writing to it");
+    }
+
+    #[test]
+    fn a_scan_history_group_is_never_itself_checked() {
+        let (mut e, fake, _s, _sh, _d, _rx) = rig(AccountOptions::default(), true);
+        e.handle(&group_chat(-1002, "Scan History"));
+        e.handle(&doc_msg(-1002, 1, 7, "x.zip", 10, "U1"));
+        assert_eq!(fake.count("downloadFile"), 0);
+    }
+
+    #[test]
+    fn switching_result_posting_off_posts_nothing() {
+        let (mut e, fake, _s, shared, _d, _rx) = rig(AccountOptions { local_reports: false, ..AccountOptions::default() }, true);
+        quick(&shared);
+        e.handle(&json!({"@type": "user", "@extra": "me", "id": 5}));
+        e.handle(&group_chat(-1002, "Scan History"));
+        shared.deliver(10, ChatKind::Private, &report("evil.exe", Verdict::Malicious));
+        for _ in 0..3 {
+            e.pump();
+        }
+        assert!(posts(&fake).is_empty());
+    }
+
+    #[test]
+    fn posts_are_spaced_out_and_bounded() {
+        let (mut e, fake, _s, shared, _d, _rx) = rig(AccountOptions::default(), true);
+        e.handle(&json!({"@type": "user", "@extra": "me", "id": 5}));
+        for i in 0..5 {
+            shared.deliver(10, ChatKind::Private, &report(&format!("e{i}.exe"), Verdict::Malicious));
+        }
+        e.pump();
+        e.pump();
+        e.pump();
+        assert_eq!(posts(&fake).len(), 1, "one message, then a pause (Telegram would throttle a burst)");
+        for i in 0..400 {
+            shared.deliver(10, ChatKind::Private, &report(&format!("f{i}.exe"), Verdict::Malicious));
+        }
+        assert!(shared.outbox.lock().unwrap().len() <= OUTBOX_MAX, "the queue cannot grow without limit");
+    }
+
+    #[test]
+    fn a_failed_post_is_recorded_not_hidden() {
+        let (mut e, _f, _s, shared, _d, _rx) = rig(AccountOptions::default(), true);
+        e.handle(&json!({"@type": "error", "@extra": "rpt:-1002", "code": 403, "message": "CHAT_WRITE_FORBIDDEN"}));
+        assert!(shared.store.recent_events(5).unwrap().iter().any(|ev| ev.kind == "telegram_account_post_failed" && ev.message.contains("CHAT_WRITE_FORBIDDEN")));
+    }
+
+    #[test]
+    fn a_checked_file_is_reported_end_to_end_from_the_scan_thread() {
+        let (mut e, fake, _s, shared, d, rx) = rig(AccountOptions { prefs: AccountPrefs { groups: true, ..AccountPrefs::default() }, ..AccountOptions::default() }, true);
+        quick(&shared);
+        e.handle(&json!({"@type": "user", "@extra": "me", "id": 5}));
+        e.handle(&group_chat(-1002, "Scan History"));
+        e.handle(&group_chat(-1001, "Design team"));
+        e.handle(&doc_msg(-1001, 1, 7, "evil.exe", 8, "E1"));
+        let p = d.path().join("files").join("evil.exe");
+        std::fs::write(&p, b"EVILEVIL").unwrap();
+        e.handle(&json!({"@type": "updateFile", "file": {"id": 7, "local": {"path": p.to_string_lossy(), "is_downloading_completed": true}}}));
+        let io: Arc<dyn TdIo> = fake.clone();
+        let (spare, _spare_rx) = sync_channel::<Job>(1);
+        e.jobs = spare; // drops the real sender, so the scan thread ends once its queue is empty
+        scan_loop(rx, shared.clone(), io, d.path().join("files"));
+        for _ in 0..4 {
+            e.pump();
+        }
+        let sent = posts(&fake);
+        let r = sent.iter().find(|(_, t)| t.contains("evil.exe")).expect("the result was posted");
+        assert_eq!(r.0, -1002);
+        assert!(r.1.contains("MALICIOUS") && r.1.contains("group \"Design team\""), "{}", r.1);
     }
 
     #[test]

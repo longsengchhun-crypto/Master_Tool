@@ -1,8 +1,28 @@
-# Personal Telegram account protection
+# Telegram protection from the user's own account (the default way)
 
-Checks files that reach **your own Telegram account** (private chats by default; groups, channels and media are opt-in),
-using Telegram's official client library (TDLib). Results go through the same engine, history and bot reports as every other
-SENTRIX source. It is separate from the bot: either can be off while the other works.
+This is how SENTRIX protects Telegram **with nothing running on the author's machine**. Everything happens on the user's own
+computer, through the user's own Telegram account, using Telegram's official client library (TDLib). No bot, no relay and no
+server of ours is involved, so there is nothing to host and no cost per user.
+
+* **What it checks:** files in private chats and in **every group the user is a member of** (administrator or not), plus
+  channels and photos/video/voice if the user switches them on.
+* **Where results go:** the user makes a group called **Scan History** (any capitalisation, "Scans History" also works) and
+  SENTRIX posts each result there **from the user's own account**. The user can add other people to read it. A user can have
+  **many** Scan History groups; they share a name, so SENTRIX numbers them (**#1, #2, ...**) and says its number in each room
+  once. Each group the user is in can be pointed at one Scan History group, or at all of them (the default), in the
+  app under Telegram > Your groups. Many groups can share one room.
+* **Without a Scan History group:** dangerous and suspicious results (and nothing else, to avoid noise) go to the user's
+  **Saved Messages**.
+* **The protected group stays silent:** SENTRIX never writes in the group it is checking, and never checks the Scan
+  History groups themselves.
+* **Pacing:** results are posted one at a time, at least about a second apart, so a burst of files cannot make Telegram throttle
+  the account. At most 200 results wait; beyond that the oldest is dropped and an event is recorded.
+* **Limits that follow from this design:** it works **only while the user's computer is on and online**; accounts with a
+  two-step (cloud) password are not supported (no password is ever collected); the check starts after a file downloads.
+* **Messages come from the person, not from a bot.** Everyone in a Scan History group sees the user's account posting there.
+
+The sections below describe the engine itself. The older "report to a bot" wording still applies if the user also connects their
+own bot (Telegram > More ways).
 
 > **Test status, stated plainly.** The transport is real and loads Telegram's real library, which has talked to Telegram's
 > real servers in testing. A complete **QR login with a real account, and a real attachment received and scanned, has not
@@ -18,8 +38,8 @@ SENTRIX source. It is separate from the bot: either can be off while the other w
 3. SENTRIX is now an extra device on the account. TDLib delivers each incoming message. For a file attachment SENTRIX has,
    before downloading anything, only its **name, size, type and the chat category**.
 4. Eligible files are downloaded into an isolated folder, checked by the same real engine (ClamAV, heuristics, archive
-   inspection), and the **downloaded copy is deleted whatever the result**. A report goes to the user's private chat with the SENTRIX bot (through the relay, see [HOSTED_BOT.md](HOSTED_BOT.md))
-   or to their own bot, according to their notification preferences. Only the text of the result leaves the computer.
+   inspection), and the **downloaded copy is deleted whatever the result**. A report is posted from the user's own account into their Scan History group (or Saved Messages), and also goes to the
+   user's own bot if they connected one. Only the text of the result leaves the computer.
 5. Files that cannot be checked are reported **UNABLE TO VERIFY** with the reason. Never clean.
 
 ## What is and is not covered

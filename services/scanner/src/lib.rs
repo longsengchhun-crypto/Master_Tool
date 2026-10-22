@@ -1,6 +1,7 @@
 //! SENTRIX security core. UI-independent: the desktop app, CLI and tests all call this crate.
 
 pub mod account;
+pub mod account_route;
 pub mod account_td;
 pub mod archive;
 pub mod clamav;

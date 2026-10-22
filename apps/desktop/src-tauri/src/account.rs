@@ -79,6 +79,7 @@ pub fn options_from(s: &Settings) -> AccountOptions {
         enabled: a.enabled,
         prefs: AccountPrefs { private_chats: a.private_chats, groups: a.groups, channels: a.channels, max_bytes: u64::from(s.max_file_size_mb.clamp(1, ACCOUNT_MAX_MB)) * 1024 * 1024 },
         media: a.media,
+        local_reports: a.local_reports,
     }
 }
 
@@ -163,6 +164,13 @@ pub fn tg_account_set_options(app: AppHandle, state: Shared<'_>, options: Accoun
     Ok(account_out(&st))
 }
 
+/// Point one of the person's groups at one of their Scan History groups (`room` = None: all of them).
+#[tauri::command]
+pub fn tg_account_set_route(state: Shared<'_>, chat_id: i64, room: Option<i64>) -> AccountOut {
+    state.account.shared.set_route(chat_id, room);
+    account_out(&state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,8 +199,8 @@ mod tests {
     }
 
     #[test]
-    fn defaults_watch_private_chats_only() {
+    fn defaults_watch_private_chats_and_groups_but_not_channels_or_media() {
         let o = options_from(&Settings::default());
-        assert!(o.enabled && o.prefs.private_chats && !o.prefs.groups && !o.prefs.channels && !o.media);
+        assert!(o.enabled && o.prefs.private_chats && o.prefs.groups && !o.prefs.channels && !o.media && o.local_reports);
     }
 }

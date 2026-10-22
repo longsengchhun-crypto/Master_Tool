@@ -102,7 +102,7 @@ export function Settings() {
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted">
           <li>Files are scanned on this computer and never uploaded.</li>
           <li>The only download is malware definitions from ClamAV, which says nothing about your files.</li>
-          <li>If you link Telegram, the text of each result (file name, verdict, time) goes to your private chat with the SENTRIX bot. If you ask the bot to protect a group, files posted in that group are checked on SENTRIX&apos;s server and deleted straight away, and the results go to your Scan History group, which everyone you add to it can read. Nothing else leaves this computer.</li>
+          <li>If you sign in to Telegram, SENTRIX checks files from your chats and groups on this computer and posts the result (file name, verdict, time) from your own account into your Scan History group or Saved Messages. Everyone you add to a Scan History group can read the results. The files themselves and your login stay on this computer and never pass through a server of ours.</li>
         </ul>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <Button variant="danger" onClick={() => setConfirmClear(true)}>Clear scan history</Button>

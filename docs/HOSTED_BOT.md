@@ -1,4 +1,9 @@
-# The shared SENTRIX bot
+# The shared SENTRIX bot (optional; not the default any more)
+
+> **Status:** the default way to use SENTRIX with Telegram is now the user's own account, on their own computer, with no bot
+> and nothing to host (see [TELEGRAM_ACCOUNT.md](TELEGRAM_ACCOUNT.md)). The shared bot described here still works and is
+> kept for anyone who wants "just add the bot to my group" without installing anything, but **it needs a machine that runs
+> all the time** (see [SERVER.md](SERVER.md)), and the desktop app no longer offers to link to it.
 
 One bot, owned by SENTRIX, for every customer. Nobody creates a bot. A customer finds the bot in Telegram, presses **Start**,
 and chooses what to protect. Every result arrives in **that customer's own private chat with the bot**. Results are never

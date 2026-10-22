@@ -79,7 +79,8 @@ export function Home() {
       ? 'New files in your watched folders are scanned as they arrive. No scanner is perfect, so stay careful with files you do not know.'
       : (status.protection.reasons[0] ?? status.protection.headline);
 
-  const reportsLinked = !!t && (t.relay.linked || t.bot.configured);
+  const acctOn = !!t && t.account.state === 'connected';
+  const reportsLinked = !!t && (acctOn || t.relay.linked || t.bot.configured);
   const watching = h ? h.roots.filter((r) => r.watching).length : null;
   const sigAge = eng.database_age_hours;
 
@@ -145,12 +146,14 @@ export function Home() {
             <p className="mt-3 text-sm text-muted">…</p>
           ) : reportsLinked ? (
             <p className="mt-3 text-sm text-ink">
-              Results go to your chat with {t.relay.linked && t.relay.botUsername ? `@${t.relay.botUsername}` : t.bot.username ? `@${t.bot.username}` : 'your bot'}.
+              {acctOn
+                ? `Your account is protected${t.account.groups.length ? ` and ${t.account.groups.length} group${t.account.groups.length === 1 ? ' is' : 's are'} watched` : ''}. Results go to ${t.account.rooms.length ? 'your Scan History group' + (t.account.rooms.length > 1 ? 's' : '') : 'your Saved Messages'}.`
+                : `Results go to your chat with ${t.relay.linked && t.relay.botUsername ? `@${t.relay.botUsername}` : t.bot.username ? `@${t.bot.username}` : 'your bot'}.`}
               <button className="mt-1 block text-muted hover:text-ink" onClick={() => go('telegram')}>Manage Telegram</button>
             </p>
           ) : (
             <div className="mt-3 text-sm">
-              <p className="text-muted">Get results on your phone, and protect your groups and account, through the SENTRIX bot.</p>
+              <p className="text-muted">Sign in to Telegram once and SENTRIX checks the files and groups you are in, on this computer, with the results posted in your own Scan History group.</p>
               <Button className="mt-3" onClick={() => go('telegram')}>Connect Telegram</Button>
             </div>
           )}
