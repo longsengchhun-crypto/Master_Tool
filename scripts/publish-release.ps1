@@ -30,7 +30,11 @@ $version = $conf.version
 $tag = "v$version"
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'The GitHub CLI (gh) is required.' }
 $repo = (gh repo view --json nameWithOwner -q .nameWithOwner).Trim()
-if (gh release view $tag 2>$null) { throw "Release $tag already exists. Bump the version first: updates are only offered for higher versions." }
+$ErrorActionPreference = 'Continue' # gh prints "release not found" on stderr, which Windows PowerShell 5.1 would treat as a failure
+gh release view $tag *> $null
+$exists = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = 'Stop'
+if ($exists) { throw "Release $tag already exists. Bump the version first: updates are only offered for higher versions." }
 
 if (-not $env:SENTRIX_SIGNING_KEY_PATH) { $env:SENTRIX_SIGNING_KEY_PATH = Join-Path $env:USERPROFILE '.sentrix-keys\updater-prod.key' }
 if (-not $env:SENTRIX_SIGNING_KEY_PASSWORD) { $env:SENTRIX_SIGNING_KEY_PASSWORD = [System.IO.File]::ReadAllText((Join-Path $env:USERPROFILE '.sentrix-keys\updater-prod.password')) }

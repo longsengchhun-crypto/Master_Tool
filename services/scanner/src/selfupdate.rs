@@ -294,6 +294,16 @@ mod tests {
         assert!(!sibling(&exe, "old").exists());
     }
 
+    /// Against the real published feed: cargo test -p sentrix-core --lib live_feed -- --ignored --nocapture
+    #[test]
+    #[ignore = "needs internet and a published release"]
+    fn live_feed_offers_a_verified_update_to_an_older_copy_and_nothing_to_the_newest() {
+        let u = check(DEFAULT_FEED, PUBLIC_KEY, "0.0.1").expect("the published feed must verify").expect("an update for 0.0.1");
+        println!("offered {} ({} bytes)", u.version, u.bytes.len());
+        assert!(is_newer(&u.version, "0.0.1") && u.bytes.starts_with(b"MZ"));
+        assert!(check(DEFAULT_FEED, PUBLIC_KEY, &u.version).unwrap().is_none(), "nothing newer than the newest");
+    }
+
     #[test]
     fn a_failed_install_leaves_the_current_program_alone() {
         let dir = tempfile::tempdir().unwrap();
