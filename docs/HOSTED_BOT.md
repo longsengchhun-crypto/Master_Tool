@@ -47,6 +47,7 @@ A bot cannot add itself to a group; Telegram does not allow it. What SENTRIX use
 |---|---|---|
 | Group file scan result | The Scan History group of the person who protects the group (their private chat with the bot until they make one) | Never the protected group. Includes the group's name, file name, verdict, detection name. **Everyone in Scan History can read it** |
 | `/report` in a group (administrators) | The same place | Counts only |
+| Clean results | Also reported, in the same place | A group protected through the shared bot reports every result, including "no known threat", because the reports go to a separate room. An administrator can switch clean reports off with `/setup clean off`; that choice is kept |
 | Scan History group | Linked by adding the bot to a group named exactly "Scan History" (any capitalisation), or `/link` in it | The adder must be a member (Telegram is asked). Renaming it, or removing the bot, unlinks it. One per person; two people never share routing |
 | App (account protection) result | The customer's private chat, via the relay | Text only: file name, verdict, time. Files stay on the customer's computer |
 | Group files | The bot's server, **in memory and a temporary folder, deleted right after the check** | Up to 20 MB, documents only. This is the one place customer files reach SENTRIX's server; the bot says so |

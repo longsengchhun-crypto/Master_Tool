@@ -160,6 +160,7 @@ fn choosing_a_group_links_it_and_every_report_goes_to_the_persons_private_chat_n
     link(&r, SAM, A, &mut n);
     // The person is told in their private chat, and the group is told only that protection started.
     assert!(until(15, || r.mock.texts_in(SAM).iter().any(|t| t.contains("is now protected"))));
+    assert!(r.store.group_get(A).unwrap().unwrap().report_clean, "a group protected through the shared bot reports clean results too, so a person testing sees every file");
     std::thread::sleep(Duration::from_secs(2));
     assert!(r.mock.texts_in(A).is_empty(), "the protected group stays completely quiet: {:?}", r.mock.texts_in(A));
     // Someone in the group posts a file. No engine here, so the honest result is UNABLE TO VERIFY.
@@ -249,6 +250,31 @@ fn a_file_in_a_group_where_protection_was_never_turned_on_is_not_checked_and_the
     assert_eq!(r.mock.texts_in(A).iter().filter(|t| t.contains("protection is not on")).count(), 1);
     assert!(r.mock.texts_in(SAM).iter().all(|t| !t.contains("invoice.pdf")), "no report exists for a file that was not checked");
     r.svc.stop();
+}
+
+#[test]
+fn groups_linked_before_the_default_changed_are_corrected_once_and_a_later_choice_is_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(JobStore::open(&dir.path().join("botd.db")).unwrap());
+    store.group_joined(A, "Old group", "supergroup", "member", 1).unwrap();
+    store.group_set_enabled(A, true, SAM, 2).unwrap();
+    assert!(!store.group_get(A).unwrap().unwrap().report_clean, "the old default");
+    let mk = |store: Arc<JobStore>| {
+        let q = Arc::new(Quarantine::open(dir.path().join("vault")).unwrap());
+        let mut cfg = ServiceConfig::new(dir.path().join("tmp"));
+        cfg.realtime = false;
+        cfg.group_shield = true;
+        cfg.hosted = Some(HostedConfig::default());
+        let svc = ProtectionService::new(Arc::new(Scanner::new(Limits::default(), None)), q, store, Arc::new(Collect::default()), cfg);
+        svc.start();
+        svc
+    };
+    mk(store.clone()).stop();
+    assert!(store.group_get(A).unwrap().unwrap().report_clean, "corrected on the first start");
+    // The person turns it off on purpose; a later restart must not undo that.
+    store.group_set_report(A, Some(false), None).unwrap();
+    mk(store.clone()).stop();
+    assert!(!store.group_get(A).unwrap().unwrap().report_clean, "the choice is kept");
 }
 
 // ---- reliability -------------------------------------------------------------------------------------------------
@@ -645,3 +671,23 @@ fn real_engine_a_malicious_file_in_a_linked_group_alerts_only_the_owner_privatel
     r.svc.stop();
     println!("[ok] real engine, shared bot: private alert, group silent, no cross-person leak");
 }
+
+/// The case that looked like "nothing happens": an ordinary, clean file posted in a protected group.
+#[test]
+#[ignore = "needs real ClamAV: see the command above"]
+fn real_engine_an_ordinary_clean_file_is_reported_in_scan_history() {
+    let clam = Arc::new(sentrix_core::clamav::ClamEngine::new(std::env::var_os("SENTRIX_CLAMAV_DIR").expect("SENTRIX_CLAMAV_DIR"), std::env::var_os("SENTRIX_DATA_DIR").expect("SENTRIX_DATA_DIR")));
+    clam.start().expect("clamd");
+    let r = rig_with(Arc::new(Scanner::new(Limits::default(), Some(clam))));
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    r.mock.add_group_document(n, A, 700, MEMBER, "How to climb up tower.pdf", b"%PDF-1.4 a harmless document
+".to_vec(), None);
+    assert!(until(60, || r.mock.texts_in(H).iter().any(|t| t.contains("climb up tower"))), "{:?}", r.mock.texts_in(H));
+    let msg = r.mock.texts_in(H).into_iter().find(|t| t.contains("climb up tower")).unwrap();
+    assert!(msg.contains("no known threat") && msg.contains("not a guarantee") && msg.contains("Design team"), "{msg}");
+    assert!(r.mock.texts_in(A).is_empty(), "the protected group stays silent");
+    r.svc.stop();
+}
+

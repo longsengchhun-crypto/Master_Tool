@@ -580,6 +580,11 @@ impl JobStore {
         Ok(n > 0)
     }
 
+    /// Turn on clean-result reports for every protected group (one-time correction, see `ProtectionService::start`).
+    pub fn group_enable_clean_reports(&self) -> Result<usize, StoreError> {
+        Ok(self.conn.lock().unwrap().execute("UPDATE tg_groups SET report_clean=1 WHERE enabled=1", [])?)
+    }
+
     pub fn group_set_report(&self, chat_id: i64, clean: Option<bool>, incomplete: Option<bool>) -> Result<(), StoreError> {
         let c = self.conn.lock().unwrap();
         if let Some(v) = clean {

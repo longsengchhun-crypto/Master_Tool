@@ -481,6 +481,9 @@ impl Inner {
                     return say("start", "Open the SENTRIX bot privately and press Start first, so I can send you the results. Then send /setup on again.".into());
                 }
                 let _ = self.store.group_set_enabled(chat, true, uid, now);
+                if self.cfg.read().unwrap().hosted.is_some() {
+                    let _ = self.store.group_set_report(chat, Some(true), None);
+                }
                 let own = bot.get_chat_member(chat, me.id).ok();
                 let blind = me.can_read_all_group_messages == Some(false) && !own.as_ref().is_some_and(|m| m.is_admin());
                 self.event("group_enabled", "info", "Group Shield was turned on for a group by one of its administrators.");

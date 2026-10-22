@@ -276,6 +276,7 @@ impl Inner {
             return say("code", "This link was already used.".into());
         }
         let _ = self.store.group_set_enabled(chat, true, owner, now);
+        let _ = self.store.group_set_report(chat, Some(true), None);
         self.event("group_linked", "info", "A group was linked to a person's private chat and protection was turned on.");
         let own = bot.get_chat_member(chat, me.id).ok();
         let blind = me.can_read_all_group_messages == Some(false) && !own.as_ref().is_some_and(|m| m.is_admin());

@@ -585,6 +585,12 @@ impl ProtectionService {
             }
         }
         inner.restart_monitor();
+        if inner.cfg.read().unwrap().hosted.is_some() && inner.store.kv_get("hosted_clean_default_v1").is_none() {
+            // Groups linked before clean results were reported by default start reporting them once. Anyone can still turn
+            // them off with /setup clean off, and that choice is kept.
+            let _ = inner.store.group_enable_clean_reports();
+            inner.store.kv_set("hosted_clean_default_v1", "1");
+        }
         let mut th = self.threads.lock().unwrap();
         let spawn = |name: &str, f: Box<dyn FnOnce() + Send>| std::thread::Builder::new().name(name.into()).spawn(f).expect("thread");
 
