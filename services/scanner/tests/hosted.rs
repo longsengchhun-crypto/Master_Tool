@@ -251,6 +251,23 @@ fn a_file_in_a_group_where_protection_was_never_turned_on_is_not_checked_and_the
     r.svc.stop();
 }
 
+// ---- reliability -------------------------------------------------------------------------------------------------
+
+#[test]
+fn a_conflict_with_another_program_is_named_in_the_log_and_the_bot_recovers_by_itself() {
+    let r = rig();
+    // Another program (a second copy, or an app with this same bot) is reading the messages.
+    r.mock.conflict_next_polls(1);
+    r.mock.add_start(1, SAM, "Sam");
+    assert!(until(10, || r.store.recent_events(20).unwrap().iter().any(|e| e.kind == "telegram_poll" && e.message.contains("Another program"))), "the conflict must be named, not silent");
+    assert!(r.store.kv_get("tg_poll_error").is_some(), "the heartbeat records why it is not receiving");
+    // The other program stops: the bot is answering again within about half a minute, with no restart.
+    assert!(until(45, || r.mock.texts_in(SAM).iter().any(|t| t.contains("What do you want to protect"))), "the bot must recover on its own");
+    assert!(until(5, || r.store.kv_get("tg_poll_error").is_none()), "and the heartbeat clears");
+    assert!(r.store.kv_get("tg_poll_ok_at").is_some());
+    r.svc.stop();
+}
+
 // ---- the Scan History group ----------------------------------------------------------------------------------------
 
 const H: i64 = -1004444444444; // Sam's Scan History group

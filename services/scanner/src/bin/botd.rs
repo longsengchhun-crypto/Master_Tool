@@ -130,10 +130,24 @@ fn main() {
     println!("[botd] relay listening on {} (put HTTPS in front of it)", relay.addr);
     println!("[botd] running");
 
+    // Every 30 seconds: is the bot actually receiving Telegram's messages? A bot that is silent says why, right here.
+    let mut ticks = 0u32;
     loop {
-        std::thread::sleep(Duration::from_secs(300));
-        store.codes_prune(sentrix_core::queue::now_ms());
-        let t = store.hosted_totals();
-        println!("[botd] people={} linked_apps={}", t.users, t.devices);
+        std::thread::sleep(Duration::from_secs(30));
+        ticks += 1;
+        let now = sentrix_core::queue::now_ms();
+        let ok_at: i64 = store.kv_get("tg_poll_ok_at").and_then(|v| v.parse().ok()).unwrap_or(0);
+        if now - ok_at > 90_000 {
+            let why = store.kv_get("tg_poll_error").unwrap_or_else(|| "no answer from Telegram yet".into());
+            println!("[botd] WARNING: the bot has not received anything from Telegram for {} s: {why}", (now - ok_at.max(now - 3_600_000)) / 1000);
+        }
+        for e in store.recent_events(5).unwrap_or_default().iter().filter(|e| e.ts > now - 31_000 && e.severity != "info") {
+            println!("[botd] {}: {}", e.severity, e.message);
+        }
+        if ticks % 10 == 0 {
+            store.codes_prune(now);
+            let t = store.hosted_totals();
+            println!("[botd] people={} linked_apps={}", t.users, t.devices);
+        }
     }
 }

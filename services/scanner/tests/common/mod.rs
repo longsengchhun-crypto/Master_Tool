@@ -49,6 +49,8 @@ pub struct State {
     pub markup: Vec<Option<Value>>,
     /// Callback ids the bot answered.
     pub answered: Vec<String>,
+    /// The next this-many getUpdates calls are answered with 409 (another program is reading the bot's messages).
+    pub poll_conflicts: u32,
     /// (chat, user) pairs Telegram reports as not being in that group.
     pub not_in_group: std::collections::HashSet<(i64, i64)>,
 }
@@ -185,6 +187,11 @@ impl Mock {
     /// A message in a group whose title is `title` (for example "Scan History").
     pub fn add_group_text_titled(&self, update_id: i64, chat: i64, message_id: i64, from: i64, title: &str, text: &str) {
         self.state.lock().unwrap().updates.push(json!({"update_id": update_id, "message": {"message_id": message_id, "chat": {"id": chat, "type": "supergroup", "title": title}, "from": {"id": from}, "text": text}}));
+    }
+
+    /// The next `n` polls fail with Telegram's 409 conflict.
+    pub fn conflict_next_polls(&self, n: u32) {
+        self.state.lock().unwrap().poll_conflicts = n;
     }
 
     /// Telegram says this person is not in this group (never joined, or left).
@@ -371,6 +378,14 @@ fn handle(mut conn: TcpStream, state: Arc<Mutex<State>>) {
             json_resp(&mut conn, 200, json!({"ok": true, "result": {"message_id": id}}));
         }
         "getUpdates" => {
+            {
+                let mut s = state.lock().unwrap();
+                if s.poll_conflicts > 0 {
+                    s.poll_conflicts -= 1;
+                    drop(s);
+                    return json_resp(&mut conn, 409, json!({"ok": false, "error_code": 409, "description": "Conflict: terminated by other getUpdates request; make sure that only one bot instance is running"}));
+                }
+            }
             let offset = body["offset"].as_i64().unwrap_or(0);
             let s = state.lock().unwrap();
             let r: Vec<Value> = s.updates.iter().filter(|u| u["update_id"].as_i64().unwrap_or(0) >= offset).cloned().collect();

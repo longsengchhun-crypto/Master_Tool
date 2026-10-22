@@ -667,26 +667,43 @@ impl ProtectionService {
                 match bot.get_updates(offset, 10, 20) {
                     Ok(updates) => {
                         backoff = 5;
+                        me.store.kv_set("tg_poll_ok_at", &now_ms().to_string());
+                        me.store.kv_delete("tg_poll_error");
                         for u in updates {
-                            if matches!(u.chat_type.as_str(), "group" | "supergroup") {
-                                if let Some(info) = me.bot_info(&bot) {
-                                    me.handle_group_update(&bot, &info, &u);
+                            // One bad message must never stop the bot for everybody: a crash while handling it is contained,
+                            // recorded, and the message is skipped (never replayed forever).
+                            let handled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                if matches!(u.chat_type.as_str(), "group" | "supergroup") {
+                                    if let Some(info) = me.bot_info(&bot) {
+                                        me.handle_group_update(&bot, &info, &u);
+                                    }
+                                } else if hosted {
+                                    if let Some(info) = me.bot_info(&bot) {
+                                        me.handle_hosted_private(&bot, &info, &u);
+                                    }
+                                } else if on && u.member_change.is_none() {
+                                    me.handle_submission(&bot, chat, &u);
                                 }
-                            } else if hosted {
-                                if let Some(info) = me.bot_info(&bot) {
-                                    me.handle_hosted_private(&bot, &info, &u);
-                                }
-                            } else if on && u.member_change.is_none() {
-                                me.handle_submission(&bot, chat, &u);
+                            }));
+                            if handled.is_err() {
+                                me.event("bot_update_panic", "critical", "A Telegram message crashed the handler internally. It was skipped and the bot keeps running.");
                             }
-                            // Only after the update was fully handled, so a crash replays it instead of losing it.
+                            // Only after the update was handled (or contained), so a crash replays nothing.
                             me.store.kv_set("tg_offset", &(u.update_id + 1).to_string());
                         }
                     }
                     Err(e) => {
-                        if matches!(e, TgError::Api { code: 401 | 409, .. }) {
-                            me.event("telegram_poll", "warning", &e.user_message());
-                            me.nap(5 * 60 * 1000);
+                        let msg = e.user_message();
+                        me.store.kv_set("tg_poll_error", &msg);
+                        if matches!(e, TgError::Api { code: 409, .. }) {
+                            // Another program is reading this bot's messages (a second copy of the service, or an app that
+                            // has this bot as its own). Only one can. Say so, and retry soon: the conflict ends the moment the
+                            // other one stops.
+                            me.event("telegram_poll", "warning", "Another program is reading this bot's messages at the same time (for example a second copy of the bot service, or the SENTRIX app connected to this same bot). Only one can. Stop the other one.");
+                            me.nap(20 * 1000);
+                        } else if matches!(e, TgError::Api { code: 401, .. }) {
+                            me.event("telegram_poll", "critical", &msg);
+                            me.nap(60 * 1000);
                         } else {
                             me.nap(backoff * 1000);
                             backoff = (backoff * 2).min(120);
