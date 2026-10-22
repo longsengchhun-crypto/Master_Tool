@@ -31,7 +31,7 @@ goblin = "0.9"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 cfb = "0.10"
 notify = "8"
-chacha20poly1305 = "0.10"
+chacha20poly1305 = "0.11"
 rand = "0.8"
 memchr = "2"
 # One fast multi-pattern pass for the attacker-technique rules.
