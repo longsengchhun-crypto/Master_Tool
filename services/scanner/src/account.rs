@@ -93,6 +93,7 @@ pub fn unverified_report(origin: &str, name: &str, size: u64, reason: &str) -> S
         blocked: false,
         cached: false,
         origin: Some(origin.to_string()),
+        threat: None,
     }
 }
 

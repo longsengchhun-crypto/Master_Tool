@@ -109,6 +109,12 @@ pub struct Finding {
     /// Path inside an archive, if the finding concerns a nested entry.
     pub location: Option<String>,
     pub detected_at: DateTime<Utc>,
+    /// The threat family this behaviour belongs to (see `threat_kb`), when the rule that found it knows one.
+    #[serde(default)]
+    pub family: Option<String>,
+    /// MITRE ATT&CK technique ids for the behaviour (reference labels, not proof it happened).
+    #[serde(default)]
+    pub attack: Vec<String>,
 }
 
 impl Finding {
@@ -122,7 +128,14 @@ impl Finding {
             evidence: evidence.into(),
             location: None,
             detected_at: Utc::now(),
+            family: None,
+            attack: Vec::new(),
         }
+    }
+    pub fn with_family(mut self, family: &str, attack: &[&str]) -> Self {
+        self.family = Some(family.to_string());
+        self.attack = attack.iter().map(|a| a.to_string()).collect();
+        self
     }
     pub fn at(mut self, loc: impl Into<String>) -> Self {
         self.location = Some(loc.into());
@@ -154,6 +167,23 @@ pub struct FileInfo {
     pub source: Option<String>,
 }
 
+/// A plain-language explanation of what kind of threat a file is, when it is one. See `threat_kb`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ThreatInfo {
+    pub family: String,
+    pub title: String,
+    /// What the attacker wants.
+    pub goal: String,
+    /// How it usually reaches people.
+    pub arrives_via: Vec<String>,
+    pub attack: Vec<String>,
+    pub advice: String,
+    /// "identified": the malware engine named it. "suggested": behaviour resembles it; evidence, not proof.
+    pub basis: String,
+    /// Other families the behaviour also resembles.
+    pub also: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanReport {
     pub id: uuid::Uuid,
@@ -176,6 +206,9 @@ pub struct ScanReport {
     /// "Removable drive", "Telegram bot submission", "Telegram personal chat" / "Telegram group" / "Telegram channel" (account protection), "Manual scan". `None` for old reports.
     #[serde(default)]
     pub origin: Option<String>,
+    /// What kind of threat this is and what it wants, in plain words. Only for findings that are one.
+    #[serde(default)]
+    pub threat: Option<ThreatInfo>,
 }
 
 /// Hard resource limits applied to every scan. Exceeding one yields `Incomplete`, never a clean verdict.

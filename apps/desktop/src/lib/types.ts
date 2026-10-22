@@ -22,6 +22,22 @@ export interface Finding {
   evidence: string;
   location: string | null;
   detected_at: string;
+  /** Threat family the behaviour belongs to, when the rule knows one. */
+  family?: string | null;
+  /** MITRE ATT&CK technique ids: reference labels, not proof it happened. */
+  attack?: string[];
+}
+
+/** What kind of threat a flagged file is. "identified": the engine named it. "suggested": behaviour resembles it. */
+export interface ThreatInfo {
+  family: string;
+  title: string;
+  goal: string;
+  arrives_via: string[];
+  attack: string[];
+  advice: string;
+  basis: 'identified' | 'suggested';
+  also: string[];
 }
 
 export interface FileInfo {
@@ -54,6 +70,8 @@ export interface ScanReport {
   cached: boolean;
   /** What triggered the scan: Telegram Desktop, Downloads folder, Browser download, Custom folder, … */
   origin?: string | null;
+  /** Only present for flagged files. */
+  threat?: ThreatInfo | null;
 }
 
 export interface EngineStatus {

@@ -34,6 +34,8 @@ notify = "8"
 chacha20poly1305 = "0.10"
 rand = "0.8"
 memchr = "2"
+# One fast multi-pattern pass for the attacker-technique rules.
+aho-corasick = "1"
 # Durable queue/outbox/event log. Bundled SQLite: no system dependency, same engine on every platform.
 rusqlite = { version = "0.40", features = ["bundled"] }
 # Telegram Bot API client (HTTPS).

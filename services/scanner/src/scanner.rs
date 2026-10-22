@@ -339,6 +339,7 @@ impl Scanner {
         if identify::double_extension(&name) {
             findings.push(Finding::new("heuristic.identify", "Double file extension", FindingKind::Heuristic, Severity::Medium, "A document-style extension is followed by an executable one, a common disguise."));
         }
+        findings.extend(crate::rules::name_findings(&name));
 
         // 5. Digital signature (Windows PE).
         if kind == FileKind::Pe {
@@ -708,6 +709,8 @@ fn io_is_transient(e: &std::io::Error) -> bool {
 
 fn finish(info: FileInfo, checks: Vec<Check>, findings: Vec<Finding>, started: DateTime<Utc>, cached: bool) -> ScanReport {
     let d = verdict::decide(&checks, &findings);
+    // Explain what kind of threat it is, but only for files that are flagged: a clean file needs no threat card.
+    let threat = if matches!(d.verdict, Verdict::Malicious | Verdict::Suspicious) { crate::threat_kb::summarize(&findings) } else { None };
     ScanReport {
         id: uuid::Uuid::new_v4(),
         file: info,
@@ -723,6 +726,7 @@ fn finish(info: FileInfo, checks: Vec<Check>, findings: Vec<Finding>, started: D
         blocked: false,
         cached,
         origin: None,
+        threat,
     }
 }
 

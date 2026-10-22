@@ -45,6 +45,19 @@ pub fn to_text(r: &ScanReport) -> String {
     let _ = writeln!(o);
     let _ = writeln!(o, "Recommended action");
     let _ = writeln!(o, "  {}", r.recommended_action);
+    if let Some(t) = &r.threat {
+        let _ = writeln!(o);
+        let _ = writeln!(o, "{}", if t.basis == "identified" { "Identified as" } else { "Looks like (from behaviour; a guess, not proof)" });
+        let _ = writeln!(o, "  {}", t.title);
+        let _ = writeln!(o, "  What the attacker wants: {}", t.goal);
+        if !t.arrives_via.is_empty() {
+            let _ = writeln!(o, "  How it usually arrives:  {}", t.arrives_via.join("; "));
+        }
+        let _ = writeln!(o, "  What to do:              {}", t.advice);
+        if !t.attack.is_empty() {
+            let _ = writeln!(o, "  MITRE ATT&CK:            {}", t.attack.join(", "));
+        }
+    }
     if r.file.type_mismatch {
         let _ = writeln!(o);
         let _ = writeln!(o, "Name check: the file name's extension does not match what the file actually is.");

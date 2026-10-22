@@ -106,7 +106,7 @@ fn main() {
         }
         let c2 = c.clone();
         std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(4 * 3600));
+            std::thread::sleep(Duration::from_secs(2 * 3600));
             match c2.update_signatures() {
                 Ok(_) => {
                     let _ = c2.reload();

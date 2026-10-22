@@ -45,6 +45,8 @@ pub fn analyze(kind: FileKind, data: &[u8]) -> Vec<Finding> {
     if !matches!(kind, FileKind::Pe) {
         out.extend(embedded_pe(data, 0, SRC_EMBED, "Executable payload embedded in a non-executable file"));
     }
+    // What attackers do, as checkable evidence (see rules.rs). Runs for every kind; archive members come through here too.
+    out.extend(crate::rules::analyze(kind, data));
     out
 }
 
@@ -128,6 +130,9 @@ fn analyze_pe(data: &[u8]) -> Vec<Finding> {
 /// Look for a second PE image (MZ header whose e_lfanew points at "PE\0\0") past the start of `data`.
 fn embedded_pe(data: &[u8], base: usize, source: &str, name: &str) -> Vec<Finding> {
     let mut start = if base == 0 { 1 } else { 0 };
+    if start >= data.len() {
+        return Vec::new();
+    }
     while let Some(rel) = memchr::memmem::find(&data[start..], b"MZ") {
         let at = start + rel;
         if let Some(hdr) = data.get(at..at + 0x40) {
@@ -316,6 +321,14 @@ fn analyze_lnk(data: &[u8]) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_and_one_byte_files_do_not_panic() {
+        for kind in [FileKind::Unknown, FileKind::Text, FileKind::Zip, FileKind::Pdf, FileKind::Pe, FileKind::ScriptJs] {
+            let _ = analyze(kind, b"");
+            let _ = analyze(kind, b"M");
+        }
+    }
 
     #[test]
     fn entropy_bounds() {

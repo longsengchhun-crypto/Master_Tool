@@ -106,6 +106,7 @@ pub fn format_report(r: &ScanReport, prefs: &NotifyPrefs, now: i64) -> Option<Ou
     if let Some(d) = detection_text(r) {
         t.push_str(&format!("<b>{}:</b> {}\n", if r.verdict == Verdict::UnableToVerify { "Reason" } else { "Detection" }, esc(&d.chars().take(300).collect::<String>())));
     }
+    t.push_str(&threat_lines(r));
     t.push_str(&format!("<b>Scan time:</b> {}\n", r.finished_at.format("%Y-%m-%d %H:%M UTC")));
     if !r.complete && r.verdict != Verdict::UnableToVerify {
         t.push_str("<b>Scan status:</b> Incomplete (some checks could not run)\n");
@@ -118,6 +119,17 @@ pub fn format_report(r: &ScanReport, prefs: &NotifyPrefs, now: i64) -> Option<Ou
 
     let ident = if r.file.sha256.is_empty() { format!("path:{}", r.file.path.display()) } else { r.file.sha256.clone() };
     Some(Outgoing { kind: kind.to_string(), dedupe_key: format!("scan:{kind}:{ident}:{}", day_bucket(now)), text: t })
+}
+
+/// "Type" and "What it does" lines for a flagged file. Behaviour-based guesses are labelled as such, never as fact.
+pub fn threat_lines(r: &ScanReport) -> String {
+    let Some(th) = &r.threat else { return String::new() };
+    if !matches!(r.verdict, Verdict::Malicious | Verdict::Suspicious) {
+        return String::new();
+    }
+    let goal: String = th.goal.chars().take(210).collect();
+    let how = if th.basis == "identified" { "" } else { " (looks like this from its behaviour; not proof)" };
+    format!("<b>Type:</b> {}{}\n<b>What it does:</b> {}\n", esc(&th.title), how, esc(&goal))
 }
 
 /// Health/system messages. De-duplicated per kind over a window so a flapping engine cannot flood the chat.
@@ -255,6 +267,7 @@ mod tests {
             blocked: false,
             cached: false,
             origin: Some("Telegram Desktop".into()),
+            threat: None,
         }
     }
     fn sig(name: &str) -> Finding {

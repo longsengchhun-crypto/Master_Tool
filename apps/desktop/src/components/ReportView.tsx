@@ -4,7 +4,7 @@ import { AlertTriangle, Check, ChevronDown, ChevronRight, Minus, MoreHorizontal,
 import { api, errText } from '../lib/api';
 import { useApp } from '../lib/app';
 import { CHECK_LABEL, bytes, when } from '../lib/format';
-import type { CheckStatus, ScanReport, Severity } from '../lib/types';
+import type { CheckStatus, ScanReport, Severity, ThreatInfo } from '../lib/types';
 import { Button, Modal, Notice, VerdictBadge } from './ui';
 
 const SEV: Record<Severity, string> = {
@@ -19,6 +19,48 @@ function CheckIcon({ s }: { s: CheckStatus }) {
   if (s === 'completed') return <Check className="size-4 text-ok" aria-hidden />;
   if (s === 'not_applicable') return <Minus className="size-4 text-faint" aria-hidden />;
   return <AlertTriangle className="size-4 text-warn" aria-hidden />;
+}
+
+/** What kind of threat this is. Says plainly when it is the engine's identification and when it is only a resemblance. */
+function ThreatCard({ t, danger }: { t: ThreatInfo; danger: boolean }) {
+  const identified = t.basis === 'identified';
+  return (
+    <section className={`rounded-lg border-l-4 bg-surface2 px-4 py-3 ${danger ? 'border-danger' : 'border-warn'}`} aria-label="What kind of threat this is">
+      <p className="text-xs font-semibold uppercase tracking-wide text-faint">{identified ? 'Identified as' : 'Looks like'}</p>
+      <h3 className="text-base font-semibold text-ink">{t.title}</h3>
+      {!identified && <p className="mt-0.5 text-xs text-muted">This comes from how the file behaves. It is a guess to help you decide, not proof.</p>}
+      <dl className="mt-3 space-y-2 text-sm">
+        <div>
+          <dt className="text-xs font-semibold text-faint">What the attacker wants</dt>
+          <dd className="text-ink">{t.goal}</dd>
+        </div>
+        {t.arrives_via.length > 0 && (
+          <div>
+            <dt className="text-xs font-semibold text-faint">How it usually arrives</dt>
+            <dd className="text-ink">{t.arrives_via.join(' · ')}</dd>
+          </div>
+        )}
+        <div>
+          <dt className="text-xs font-semibold text-faint">What to do</dt>
+          <dd className="text-ink">{t.advice}</dd>
+        </div>
+        {t.also.length > 0 && (
+          <div>
+            <dt className="text-xs font-semibold text-faint">Also resembles</dt>
+            <dd className="text-muted">{t.also.join(', ')}</dd>
+          </div>
+        )}
+      </dl>
+      {t.attack.length > 0 && (
+        <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-faint">
+          MITRE ATT&amp;CK
+          {t.attack.map((a) => (
+            <span key={a} className="rounded bg-solid px-1.5 py-0.5 font-mono text-muted">{a}</span>
+          ))}
+        </p>
+      )}
+    </section>
+  );
 }
 
 export function ReportView({ report: r, onChanged }: { report: ScanReport; onChanged?: () => void }) {
@@ -95,6 +137,8 @@ export function ReportView({ report: r, onChanged }: { report: ScanReport; onCha
       {r.quarantined && <Notice tone="info">This file is in quarantine. Open Quarantine to restore or delete it.</Notice>}
 
       <p className="text-sm text-ink">{r.recommended_action}</p>
+
+      {r.threat && <ThreatCard t={r.threat} danger={danger} />}
 
       <div className="flex flex-wrap items-center gap-2">
         {canQuarantine && (

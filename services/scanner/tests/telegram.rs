@@ -30,6 +30,7 @@ fn report(verdict: Verdict, name: &str, sha: &str) -> ScanReport {
         blocked: false,
         cached: false,
         origin: Some("Telegram Desktop".into()),
+        threat: None,
     };
     if verdict == Verdict::Malicious {
         r.findings.push(sentrix_core::Finding::new("clamav", "Eicar-Test-Signature", FindingKind::Signature, Severity::High, "e"));

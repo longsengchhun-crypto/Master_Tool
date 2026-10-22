@@ -743,11 +743,11 @@ impl Inner {
         let hash = if r.file.sha256.len() >= 16 { format!("\nSHA-256: <code>{}…</code>", &r.file.sha256[..16]) } else { String::new() };
         let (text, urgent, post) = match r.verdict {
             Verdict::Malicious => (
-                format!("<b>SENTRIX: MALICIOUS file</b>\n<b>{shown}</b>\nDetection: {}{hash}{action_line}\nDo not open it.", if sigs.is_empty() { "positively identified by the scanner".into() } else { sigs.join(", ") }),
+                format!("<b>SENTRIX: MALICIOUS file</b>\n<b>{shown}</b>\nDetection: {}{hash}{action_line}\n{}Do not open it.", if sigs.is_empty() { "positively identified by the scanner".into() } else { sigs.join(", ") }, crate::notify::threat_lines(r)),
                 true,
                 true,
             ),
-            Verdict::Suspicious => (format!("<b>SENTRIX: SUSPICIOUS file</b>\n<b>{shown}</b>\nIndicators were found that deserve a closer look. This is not proof of malware. Be careful before opening it.{hash}"), false, true),
+            Verdict::Suspicious => (format!("<b>SENTRIX: SUSPICIOUS file</b>\n<b>{shown}</b>\nIndicators were found that deserve a closer look. This is not proof of malware. Be careful before opening it.{hash}\n{}", crate::notify::threat_lines(r)), false, true),
             Verdict::Clean => (format!("<b>SENTRIX: no known threat</b>\n<b>{shown}</b>\nThe checks that ran found nothing. That is not a guarantee."), false, g.report_clean),
             Verdict::UnableToVerify | Verdict::Pending => (format!("<b>SENTRIX: could not be fully checked</b>\n<b>{shown}</b>\n{}\nNot known to be safe.", esc(&r.summary)), false, g.report_incomplete),
         };

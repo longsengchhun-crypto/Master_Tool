@@ -187,8 +187,8 @@ fn owner_submission_is_scanned_answered_and_cleaned_up() {
     m.add_document_update(10, CHAT, CHAT, "my<doc>\u{202E}fdp.pdf", b"%PDF-1.4 not malware".to_vec());
     assert!(m.wait_for_messages(1, 25), "the owner must get an answer");
     let reply = m.sent_texts().remove(0);
-    // Without an engine the honest answer is "could not verify", never "clean".
-    assert!(reply.contains("UNABLE TO VERIFY"), "{reply}");
+    // The name hides a right-to-left override, which is evidence in itself (Suspicious). With no engine the file can never be CLEAN.
+    assert!(reply.contains("SUSPICIOUS") && reply.contains("text-direction"), "{reply}");
     assert!(!reply.contains("Status:</b> CLEAN"));
     assert!(!reply.contains('\u{202E}') && reply.contains("my&lt;doc&gt;"), "untrusted name must be neutralised: {reply}");
     assert!(until(5, || r.hooks.count() == 1));
