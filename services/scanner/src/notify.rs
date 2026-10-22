@@ -8,7 +8,7 @@
 //!  * delivery problems affect only the outbox: they can never change a verdict or stop protection.
 
 use crate::queue::{now_ms, JobStore, Retry};
-use crate::telegram::{esc, safe_display_name, BotClient, TgError};
+use crate::telegram::{esc, safe_display_name, Courier, TgError};
 use crate::types::{CheckStatus, FindingKind, ScanReport, Severity, Verdict};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -147,12 +147,12 @@ pub struct Delivery {
 
 /// Send what is due. Never panics and never touches scan state. `min_gap` paces sends (Telegram allows about one
 /// message per second to a single chat). Stops early on a rate-limit so we do not hammer a 429.
-pub fn deliver_due(store: &JobStore, client: &BotClient, chat_id: i64, max: usize, min_gap: Duration) -> Delivery {
+pub fn deliver_due(store: &JobStore, client: &dyn Courier, chat_id: i64, max: usize, min_gap: Duration) -> Delivery {
     deliver_due_at(store, client, chat_id, max, min_gap, now_ms())
 }
 
 /// `deliver_due` with an explicit clock, so retry/backoff behaviour is testable without waiting.
-pub fn deliver_due_at(store: &JobStore, client: &BotClient, chat_id: i64, max: usize, min_gap: Duration, now: i64) -> Delivery {
+pub fn deliver_due_at(store: &JobStore, client: &dyn Courier, chat_id: i64, max: usize, min_gap: Duration, now: i64) -> Delivery {
     let mut d = Delivery::default();
     let due = match store.claim_notifications(now, max) {
         Ok(v) => v,
@@ -185,6 +185,10 @@ pub fn deliver_due_at(store: &JobStore, client: &BotClient, chat_id: i64, max: u
                     let _ = store.notification_dead(&n.id, &msg, now);
                     // 403 from a group means the bot was removed or muted there: stop protecting it instead of failing forever.
                     if let (Some(g), TgError::Api { code: 403, .. }) = (n.chat_id, &e) {
+                        // A person who blocked the bot cannot be written to until they press Start again.
+                        if g > 0 {
+                            store.user_set_blocked(g, true);
+                        }
                         let _ = store.group_left(g, now);
                         store.add_event("group_removed", "warning", "The bot can no longer post in a group (removed or blocked). Protection for it was turned off.", now);
                     }

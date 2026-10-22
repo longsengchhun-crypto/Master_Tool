@@ -12,8 +12,9 @@ interface Mode {
   tone: Tone;
   detail: string;
   lights: [string, Dot][];
-  lastScan: number | null;
-  lastReport: number | null;
+  /** `undefined` hides the line (the desktop cannot know it, for example for groups managed in the bot). */
+  lastScan: number | null | undefined;
+  lastReport: number | null | undefined;
   threats: number;
 }
 
@@ -24,8 +25,9 @@ interface Mode {
 export function modes(t: TelegramStatus, engine: AppStatus['engine'] | undefined): { group: Mode; personal: Mode } {
   const scannerOk = engine?.state === 'running';
   const scannerDot: Dot = scannerOk ? 'ok' : 'danger';
-  const reportOk = t.bot.connected && t.bot.lastTestOk !== false;
-  const reportDot: Dot = !t.bot.configured ? 'off' : t.bot.failed24h > 0 || t.bot.lastDeliveryError ? 'warn' : reportOk ? 'ok' : 'warn';
+  const viaBot = t.relay.linked;
+  const reportOk = viaBot ? t.relay.reachable !== false && !t.relay.error : t.bot.connected && t.bot.lastTestOk !== false;
+  const reportDot: Dot = viaBot ? (reportOk ? 'ok' : 'warn') : !t.bot.configured ? 'off' : t.bot.failed24h > 0 || t.bot.lastDeliveryError ? 'warn' : reportOk ? 'ok' : 'warn';
   const reports: [string, Dot] = ['Reports', reportDot];
 
   // ---- groups
@@ -35,6 +37,7 @@ export function modes(t: TelegramStatus, engine: AppStatus['engine'] | undefined
   const gThreats = g.list.reduce((n, x) => n + x.stats.threats, 0);
   let group: Pick<Mode, 'word' | 'tone' | 'detail'>;
   if (!t.allowed || !g.allowed) group = { word: 'Off', tone: 'muted', detail: 'Your organization does not allow this.' };
+  else if (viaBot) group = { word: 'Set up in the bot', tone: 'muted', detail: 'Groups are added and managed in the SENTRIX bot. Open it and choose Protect a group. Results come to your chat with the bot.' };
   else if (!t.bot.configured) group = { word: 'Disconnected', tone: 'muted', detail: 'Connect your bot first. Group protection runs through it.' };
   else if (!g.shield) group = { word: 'Off', tone: 'muted', detail: 'Switch it on, add your bot to a group, then a group administrator sends /setup on.' };
   else if (!scannerOk) group = { word: 'Scanner unavailable', tone: 'danger', detail: 'Files in groups cannot be checked right now, and are never reported as safe.' };
@@ -44,17 +47,22 @@ export function modes(t: TelegramStatus, engine: AppStatus['engine'] | undefined
   const groupMode: Mode = {
     title: 'Group protection',
     ...group,
-    lights: [
-      ['Enabled', g.shield ? 'ok' : 'off'],
-      ['Bot connected', t.bot.configured ? (reportOk ? 'ok' : 'warn') : 'off'],
-      ['Groups protected', enabledGroups.length ? 'ok' : g.shield ? 'warn' : 'off'],
-      ['Visibility', g.shield ? (g.privacyBlocks ? 'warn' : 'ok') : 'off'],
-      ['Scanner', g.shield ? scannerDot : 'off'],
-      reports,
-    ],
-    lastScan: gLast,
-    lastReport: t.bot.lastDeliveryAt,
-    threats: gThreats,
+    lights: viaBot
+      ? [
+          ['Linked to the bot', 'ok'],
+          reports,
+        ]
+      : [
+          ['Enabled', g.shield ? 'ok' : 'off'],
+          ['Bot connected', t.bot.configured ? (reportOk ? 'ok' : 'warn') : 'off'],
+          ['Groups protected', enabledGroups.length ? 'ok' : g.shield ? 'warn' : 'off'],
+          ['Visibility', g.shield ? (g.privacyBlocks ? 'warn' : 'ok') : 'off'],
+          ['Scanner', g.shield ? scannerDot : 'off'],
+          reports,
+        ],
+    lastScan: viaBot ? undefined : gLast,
+    lastReport: viaBot ? undefined : t.bot.lastDeliveryAt,
+    threats: viaBot ? 0 : gThreats,
   };
 
   // ---- personal account
@@ -116,8 +124,8 @@ function ModeCard({ m, action }: { m: Mode; action?: React.ReactNode }) {
         ))}
       </ul>
       <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-1 border-t border-line pt-3 text-xs">
-        <div><dt className="inline text-muted">Last scan </dt><dd className="inline font-semibold text-ink">{m.lastScan ? agoMs(m.lastScan) : 'None yet'}</dd></div>
-        <div><dt className="inline text-muted">Last report </dt><dd className="inline font-semibold text-ink">{m.lastReport ? agoMs(m.lastReport) : 'None yet'}</dd></div>
+        {m.lastScan !== undefined && <div><dt className="inline text-muted">Last scan </dt><dd className="inline font-semibold text-ink">{m.lastScan ? agoMs(m.lastScan) : 'None yet'}</dd></div>}
+        {m.lastReport !== undefined && <div><dt className="inline text-muted">Last report </dt><dd className="inline font-semibold text-ink">{m.lastReport ? agoMs(m.lastReport) : 'None yet'}</dd></div>}
         {m.threats > 0 && <div><dt className="inline text-muted">Threats </dt><dd className="inline font-semibold text-danger">{m.threats}</dd></div>}
       </dl>
       {action && <div className="mt-3">{action}</div>}
@@ -128,11 +136,11 @@ function ModeCard({ m, action }: { m: Mode; action?: React.ReactNode }) {
 export function TelegramModes({ t, engine, onOpen, onBoth, busy }: { t: TelegramStatus; engine: AppStatus['engine'] | undefined; onOpen: (tab: 'reports' | 'account' | 'groups') => void; onBoth: () => void; busy: boolean }) {
   const { group, personal } = modes(t, engine);
   const bothOn = group.word === 'Protection active' && personal.word === 'Protection active';
-  const groupGo = t.bot.configured ? 'groups' : 'reports';
+  const groupGo = t.bot.configured || t.relay.linked ? 'groups' : 'reports';
   return (
     <section aria-label="Protection modes" className="mb-5">
       <div className="grid gap-4 md:grid-cols-2">
-        <ModeCard m={group} action={<Button onClick={() => onOpen(groupGo)}>{t.bot.configured ? 'Group settings' : 'Set up your bot'}</Button>} />
+        <ModeCard m={group} action={<Button onClick={() => onOpen(groupGo)}>{t.relay.linked ? 'How to add a group' : t.bot.configured ? 'Group settings' : 'Set up your bot'}</Button>} />
         <ModeCard m={personal} action={<Button onClick={() => onOpen('account')}>Account settings</Button>} />
       </div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-muted">

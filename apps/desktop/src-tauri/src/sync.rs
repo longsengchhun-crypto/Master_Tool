@@ -113,7 +113,7 @@ fn heartbeat_payload(app: &AppHandle, st: &AppState) -> Value {
             "scans24h": gt.scans, "threats24h": gt.threats, "errors24h": gt.errors,
         },
         "telegram": {
-            "botConnected": st.tg_vault.exists() && st.store.settings.lock().unwrap().telegram.chat_id.is_some(),
+            "botConnected": (st.tg_vault.exists() && st.store.settings.lock().unwrap().telegram.chat_id.is_some()) || crate::hosted::relay_out(st).linked,
             "deliveryFailures24h": ob.failed_24h,
             "accountState": account_state(&st.account.view().link),
             // Counts only. Never file names, chat names, account names or ids.

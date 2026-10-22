@@ -35,10 +35,12 @@ pub(crate) struct GroupState {
     pub bot_info: Mutex<Option<(BotInfo, Instant)>>,
     msgs: Mutex<HashMap<i64, VecDeque<Instant>>>,
     scans: Mutex<HashMap<i64, VecDeque<Instant>>>,
+    /// Messages per person in private chats with the shared bot.
+    pub(crate) private: Mutex<HashMap<i64, VecDeque<Instant>>>,
     notices: Mutex<HashMap<(i64, &'static str), Instant>>,
 }
 
-fn allow(map: &Mutex<HashMap<i64, VecDeque<Instant>>>, chat: i64, limit: usize, window: Duration) -> bool {
+pub(crate) fn allow(map: &Mutex<HashMap<i64, VecDeque<Instant>>>, chat: i64, limit: usize, window: Duration) -> bool {
     let mut m = map.lock().unwrap();
     let q = m.entry(chat).or_default();
     let now = Instant::now();
@@ -81,6 +83,8 @@ fn ago_text(ms: Option<i64>) -> String {
 
 const HELP: &str = "<b>SENTRIX Group Shield</b>\nI scan files posted in this group on the bot owner's computer and report threats.\n\n/status: protection state\n/scanstatus: scan counts\n/report: administrators get a summary of the last 7 days\n/setup: administrators turn protection on or off\n\n<b>Limits</b>\nOnly files sent as documents, up to 20 MB, and only while the owner's computer is on. Photos, videos and voice messages are not scanned. If I cannot see a file (Telegram privacy mode) or cannot check it fully, it is not reported as safe.";
 
+const HELP_HOSTED: &str = "<b>SENTRIX</b>\nI check files posted in this group and tell the administrator who set me up, privately. Nothing about scan results is posted here.\n\n/status: protection state\n/scanstatus: scan counts\n/report: administrators get a summary privately\n/setup: administrators turn protection on or off\n\n<b>Limits</b>\nOnly files sent as documents, up to 20 MB. Photos, videos and voice messages are not checked. If I cannot see a file (Telegram privacy mode) or cannot check it fully, it is not reported as safe.";
+
 impl Inner {
     /// The bot's own details, refreshed every ten minutes. Also records whether privacy mode hides group files from it.
     pub(crate) fn bot_info(&self, bot: &BotClient) -> Option<BotInfo> {
@@ -103,7 +107,7 @@ impl Inner {
     }
 
     /// Queue a message for a group, subject to a per-group rate limit. Returns whether it was queued.
-    fn say(&self, chat: i64, reply_to: Option<i64>, key: &str, kind: &str, text: String, urgent: bool) -> bool {
+    pub(crate) fn say(&self, chat: i64, reply_to: Option<i64>, key: &str, kind: &str, text: String, urgent: bool) -> bool {
         let limit = if urgent { URGENT_MSGS_PER_MIN } else { MSGS_PER_MIN };
         if !allow(&self.groups.msgs, chat, limit, Duration::from_secs(60)) {
             if self.notice_due(chat, "rate_limited", Duration::from_secs(300)) {
@@ -164,6 +168,27 @@ impl Inner {
         // Photos, videos, audio and stickers are deliberately not scanned (see the module comment).
     }
 
+    /// Where a group's scan reports go: the private chat of the person who protects it (shared bot), or the bot owner's
+    /// private chat (own bot). Never the group itself, so other members do not see who posted what.
+    fn report_dest(&self, g: &Group) -> Option<i64> {
+        let cfg = self.cfg.read().unwrap();
+        if cfg.hosted.is_some() {
+            g.enabled_by.filter(|u| self.store.user_reachable(*u))
+        } else {
+            cfg.chat_id
+        }
+    }
+
+    fn post_report(&self, g: &Group, key: &str, body: String, urgent: bool) -> bool {
+        let Some(dest) = self.report_dest(g) else {
+            self.event("group_report_undeliverable", "warning", "A scan report could not be sent because the person who protects the group cannot be reached. They need to open the bot and press Start.");
+            return false;
+        };
+        let title: String = g.title.chars().filter(|c| !c.is_control()).take(60).collect();
+        let text = format!("<b>Group:</b> {}\n{}", esc(&title), body);
+        self.say(dest, None, &format!("r:{}:{key}", g.chat_id), "group_scan", text, urgent)
+    }
+
     fn on_membership(&self, u: &Incoming, mc: &MemberChange) {
         let now = now_ms();
         match mc.new_status.as_str() {
@@ -173,14 +198,17 @@ impl Inner {
                 if was_out {
                     self.event("group_joined", "info", "The SENTRIX bot was added to a group. Protection stays off until a group administrator sends /setup on.");
                     if self.cfg.read().unwrap().group_shield {
-                        let _ = self.say(
-                            u.chat_id,
-                            None,
-                            &format!("welcome:{}", u.update_id),
-                            "group_notice",
-                            "<b>SENTRIX Group Shield</b> was added. It is <b>off</b> until a group administrator sends <code>/setup on</code>. Send /help for what it can and cannot see.".into(),
-                            false,
-                        );
+                        let hosted = self.cfg.read().unwrap().hosted.is_some();
+                        let blind = mc.new_status != "administrator" && self.store.kv_get("tg_privacy_blocking").as_deref() == Some("1");
+                        let mut t = if hosted {
+                            String::from("<b>SENTRIX</b> was added. It is <b>off</b> until a group administrator opens the SENTRIX bot in a private chat, presses Start and chooses Protect a group. Scan results are sent to that person privately, never posted here. Send /help for what it can and cannot see.")
+                        } else {
+                            String::from("<b>SENTRIX Group Shield</b> was added. It is <b>off</b> until a group administrator sends <code>/setup on</code>. Scan results are sent privately to the bot owner, not posted here. Send /help for what it can and cannot see.")
+                        };
+                        if blind {
+                            t += "\n\n<b>Telegram is hiding this group's files from me.</b> Make me a group administrator (no special rights are needed) so I can see them.";
+                        }
+                        let _ = self.say(u.chat_id, None, &format!("welcome:{}", u.update_id), "group_notice", t, false);
                     }
                 }
             }
@@ -223,6 +251,12 @@ impl Inner {
             return;
         }
         let args: Vec<String> = words.map(|w| w.to_ascii_lowercase()).collect();
+        let hosted = self.cfg.read().unwrap().hosted.is_some();
+        // Shared bot: the person pressed "Choose a group" in a private chat and Telegram posted /start <code> here.
+        if hosted && cmd == "/start" && args.first().is_some_and(|a| a.starts_with("g_")) {
+            self.hosted_link_group(bot, me, u, &args[0]);
+            return;
+        }
         let chat = u.chat_id;
         let reply = |tag: &str, body: String| {
             let _ = self.say(chat, u.message_id, &format!("{tag}:{}", u.update_id), "group_reply", body, false);
@@ -236,11 +270,22 @@ impl Inner {
         }
 
         match cmd.as_str() {
-            "/help" | "/start" => reply("help", HELP.into()),
+            "/help" | "/start" => reply("help", if hosted { HELP_HOSTED.into() } else { HELP.into() }),
             "/status" => reply("status", self.status_text(bot, me, g)),
             "/scanstatus" => reply("scanstatus", self.scanstatus_text(g)),
             "/report" => match self.require_admin(bot, u) {
-                Ok(_) => reply("report", self.report_text(g)),
+                Ok(uid) => {
+                    // A summary is a report: it goes to the administrator's private chat, never into the group.
+                    let dest = if hosted { Some(uid).filter(|x| self.store.user_reachable(*x)) } else { self.cfg.read().unwrap().chat_id };
+                    match dest {
+                        Some(d) => {
+                            let t = format!("<b>Group:</b> {}\n{}", esc(&g.title), self.report_text(g));
+                            let _ = self.say(d, None, &format!("rpt:{}:{}", g.chat_id, u.update_id), "group_scan", t, false);
+                            reply("report", "The summary was sent to you privately.".into());
+                        }
+                        None => reply("report", "Open the SENTRIX bot privately and press Start first. Reports are sent there, not here.".into()),
+                    }
+                }
                 Err(why) => {
                     self.rejected.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     reply("denied", why.into());
@@ -320,6 +365,9 @@ impl Inner {
                 ),
             ),
             ["on"] => {
+                if self.cfg.read().unwrap().hosted.is_some() && !self.store.user_reachable(uid) {
+                    return say("start", "Open the SENTRIX bot privately and press Start first, so I can send you the results. Then send /setup on again.".into());
+                }
                 let _ = self.store.group_set_enabled(chat, true, uid, now);
                 let own = bot.get_chat_member(chat, me.id).ok();
                 let blind = me.can_read_all_group_messages == Some(false) && !own.as_ref().is_some_and(|m| m.is_admin());
@@ -329,7 +377,7 @@ impl Inner {
                     if blind {
                         "Protection is <b>on</b>, but I cannot see files yet: Telegram privacy mode is on. Make me a group administrator, or ask the bot owner to run /setprivacy in @BotFather and choose Disable, then re-add me.".into()
                     } else {
-                        "Protection is <b>on</b>. Files posted as documents (up to 20 MB) will be scanned and threats reported here.".into()
+                        "Protection is <b>on</b>. Files posted as documents (up to 20 MB) will be scanned. Results are sent privately to the administrator who turned this on, not posted here.".into()
                     },
                 );
             }
@@ -401,14 +449,14 @@ impl Inner {
         let size = doc.file_size.unwrap_or(0);
         let incomplete_note = |why: String| {
             if g.report_incomplete {
-                let _ = self.say(chat, Some(mid), &format!("m{mid}"), "group_scan", format!("<b>{shown}</b> {why} It was <b>not checked</b> and is not known to be safe."), false);
+                let _ = self.post_report(g, &format!("m{mid}"), format!("<b>{shown}</b> {why} It was <b>not checked</b> and is not known to be safe."), false);
             }
         };
 
         if !allow(&self.groups.scans, chat, SCANS_PER_MIN, Duration::from_secs(60)) {
             let _ = self.store.group_record_scan(chat, mid, uid, "", size, "UNABLE_TO_VERIFY", false, "skipped_rate", None, now);
             if self.notice_due(chat, "scan_rate", Duration::from_secs(60)) {
-                let _ = self.say(chat, None, &format!("rate:{}", u.update_id), "group_notice", "Too many files at once. Some were <b>skipped and not checked</b>. Post them again in a minute.".into(), false);
+                let _ = self.post_report(g, &format!("rate:{}", u.update_id), "Too many files at once. Some were <b>skipped and not checked</b>.".into(), false);
             }
             return;
         }
@@ -486,7 +534,7 @@ impl Inner {
             Verdict::UnableToVerify | Verdict::Pending => (format!("<b>SENTRIX: could not be fully checked</b>\n<b>{shown}</b>\n{}\nNot known to be safe.", esc(&r.summary)), false, g.report_incomplete),
         };
         if post {
-            let _ = self.say(chat, Some(mid), &format!("m{mid}"), "group_scan", text, urgent);
+            let _ = self.post_report(&g, &format!("m{mid}"), text, urgent);
         }
     }
 }

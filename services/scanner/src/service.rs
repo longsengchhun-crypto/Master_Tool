@@ -16,7 +16,8 @@ use crate::notify::{self, NotifyPrefs};
 use crate::quarantine::{sanitize_filename, Quarantine};
 use crate::queue::*;
 use crate::scanner::{walk, EngineStatus, ScanOptions, Scanner};
-use crate::telegram::{esc, safe_display_name, BotClient, Incoming, TgError, MAX_BOT_DOWNLOAD};
+use crate::hosted::HostedConfig;
+use crate::telegram::{esc, safe_display_name, BotClient, Courier, Incoming, TgError, MAX_BOT_DOWNLOAD};
 use crate::types::{ScanReport, Verdict};
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -46,6 +47,10 @@ pub struct ServiceConfig {
     pub accept_submissions: bool,
     /// Group Shield master switch: the owner has agreed that groups the bot is in may be scanned on this computer.
     pub group_shield: bool,
+    /// Shared-bot mode (the hosted SENTRIX bot): everyone who finds the bot can protect their own groups.
+    pub hosted: Option<HostedConfig>,
+    /// Reports go through the relay (`set_courier`) instead of a bot token held on this computer.
+    pub relay: bool,
     pub workers: usize,
     /// Reconciliation only looks at files modified within this many days (a whole old Downloads folder is not rescanned).
     pub reconcile_lookback_days: i64,
@@ -54,7 +59,7 @@ pub struct ServiceConfig {
 
 impl ServiceConfig {
     pub fn new(tmp_root: PathBuf) -> Self {
-        ServiceConfig { realtime: false, roots: vec![], exclude: vec![], auto_quarantine: false, execution_guard: true, notify: NotifyPrefs::default(), chat_id: None, accept_submissions: false, group_shield: false, workers: 2, reconcile_lookback_days: 7, tmp_root }
+        ServiceConfig { realtime: false, roots: vec![], exclude: vec![], auto_quarantine: false, execution_guard: true, notify: NotifyPrefs::default(), chat_id: None, accept_submissions: false, group_shield: false, hosted: None, relay: false, workers: 2, reconcile_lookback_days: 7, tmp_root }
     }
 }
 
@@ -105,6 +110,7 @@ pub(crate) struct Inner {
     pub(crate) hooks: Arc<dyn Hooks>,
     pub(crate) cfg: RwLock<ServiceConfig>,
     pub(crate) bot: RwLock<Option<Arc<BotClient>>>,
+    pub(crate) courier: RwLock<Option<Arc<dyn Courier>>>,
     pub(crate) monitor: Mutex<Option<Monitor>>,
     pub(crate) stop: Arc<AtomicBool>,
     pub(crate) last_engine_state: Mutex<String>,
@@ -321,8 +327,17 @@ impl Inner {
         self.hooks.on_health_changed();
     }
 
+    /// Is there somewhere to send reports? Either the person's own bot chat, or the relay in front of the shared bot.
+    pub(crate) fn reporting_ready(&self, cfg: &ServiceConfig) -> bool {
+        if cfg.relay {
+            self.courier.read().unwrap().is_some()
+        } else {
+            cfg.chat_id.is_some() && self.bot.read().unwrap().is_some()
+        }
+    }
+
     fn queue_report_notification(&self, report: &ScanReport, cfg: &ServiceConfig) {
-        if cfg.chat_id.is_none() || self.bot.read().unwrap().is_none() {
+        if !self.reporting_ready(cfg) {
             return;
         }
         if let Some(o) = notify::format_report(report, &cfg.notify, now_ms()) {
@@ -344,7 +359,7 @@ impl Inner {
                 "running" if matches!(prev.as_str(), "unavailable" | "stopped") => Some("protection_restored"),
                 _ => None,
             };
-            if let (Some(k), Some(_), true) = (sys, cfg.chat_id, self.bot.read().unwrap().is_some()) {
+            if let (Some(k), true) = (sys, self.reporting_ready(&cfg)) {
                 if let Some(o) = notify::format_system(k, &es.detail, &cfg.notify, now_ms()) {
                     let _ = self.store.enqueue_notification(&o.dedupe_key, &o.kind, &o.text, now_ms());
                 }
@@ -485,6 +500,7 @@ impl ProtectionService {
                 hooks,
                 cfg: RwLock::new(cfg),
                 bot: RwLock::new(None),
+                courier: RwLock::new(None),
                 monitor: Mutex::new(None),
                 stop: Arc::new(AtomicBool::new(false)),
                 last_engine_state: Mutex::new(String::new()),
@@ -554,6 +570,11 @@ impl ProtectionService {
         *self.inner.bot.write().unwrap() = bot;
     }
 
+    /// Where queued reports are delivered when `cfg.relay` is on (the relay in front of the shared bot).
+    pub fn set_courier(&self, courier: Option<Arc<dyn Courier>>) {
+        *self.inner.courier.write().unwrap() = courier;
+    }
+
     /// Start workers and background loops. Anything left "scanning" by a previous run is recovered first.
     pub fn start(&self) {
         let inner = &self.inner;
@@ -616,9 +637,15 @@ impl ProtectionService {
         let me = inner.clone();
         th.push(spawn("sentrix-outbox", Box::new(move || {
             while me.nap(1500) {
-                let (bot, chat) = (me.bot.read().unwrap().clone(), me.cfg.read().unwrap().chat_id);
-                if let (Some(bot), Some(chat)) = (bot, chat) {
-                    let d = notify::deliver_due(&me.store, &bot, chat, 5, Duration::from_millis(1100));
+                let (cfg_chat, relay, hosted) = {
+                    let c = me.cfg.read().unwrap();
+                    (c.chat_id, c.relay, c.hosted.is_some())
+                };
+                // Through the relay, or straight through the bot. In shared-bot mode every row names its own chat.
+                let courier: Option<Arc<dyn Courier>> = if relay { me.courier.read().unwrap().clone() } else { me.bot.read().unwrap().clone().map(|b| b as Arc<dyn Courier>) };
+                let chat = if relay || hosted { Some(cfg_chat.unwrap_or(0)) } else { cfg_chat };
+                if let (Some(courier), Some(chat)) = (courier, chat) {
+                    let d = notify::deliver_due(&me.store, &*courier, chat, 5, Duration::from_millis(1100));
                     if d.sent + d.retrying + d.dead > 0 {
                         me.hooks.on_health_changed();
                     }
@@ -630,12 +657,12 @@ impl ProtectionService {
         th.push(spawn("sentrix-tgbot", Box::new(move || {
             let mut backoff = 5u64;
             while me.nap(1000) {
-                let (bot, chat, on, shield) = {
+                let (bot, chat, on, shield, hosted) = {
                     let c = me.cfg.read().unwrap();
-                    (me.bot.read().unwrap().clone(), c.chat_id, c.accept_submissions, c.group_shield)
+                    (me.bot.read().unwrap().clone(), if c.hosted.is_some() { Some(c.chat_id.unwrap_or(0)) } else { c.chat_id }, c.accept_submissions, c.group_shield, c.hosted.is_some())
                 };
                 // One worker serves both features; it only runs while at least one of them is switched on.
-                let (Some(bot), Some(chat), true) = (bot, chat, on || shield) else { continue };
+                let (Some(bot), Some(chat), true) = (bot, chat, on || shield || hosted) else { continue };
                 let offset = me.store.kv_get("tg_offset").and_then(|s| s.parse::<i64>().ok());
                 match bot.get_updates(offset, 10, 20) {
                     Ok(updates) => {
@@ -644,6 +671,10 @@ impl ProtectionService {
                             if matches!(u.chat_type.as_str(), "group" | "supergroup") {
                                 if let Some(info) = me.bot_info(&bot) {
                                     me.handle_group_update(&bot, &info, &u);
+                                }
+                            } else if hosted {
+                                if let Some(info) = me.bot_info(&bot) {
+                                    me.handle_hosted_private(&bot, &info, &u);
                                 }
                             } else if on && u.member_change.is_none() {
                                 me.handle_submission(&bot, chat, &u);
@@ -703,7 +734,7 @@ impl ProtectionService {
     /// An account-level notice (for example "Telegram authorization expired") through the user's own bot, if they want it.
     pub fn notify_system(&self, kind: &'static str, detail: &str) {
         let cfg = self.inner.cfg.read().unwrap().clone();
-        if cfg.chat_id.is_some() && self.inner.bot.read().unwrap().is_some() {
+        if self.inner.reporting_ready(&cfg) {
             if let Some(o) = notify::format_system(kind, detail, &cfg.notify, now_ms()) {
                 let _ = self.inner.store.enqueue_notification(&o.dedupe_key, &o.kind, &o.text, now_ms());
             }

@@ -11,6 +11,10 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-message",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://t.me/*" }]
+    },
     "notification:default",
     "autostart:allow-enable",
     "autostart:allow-disable",

@@ -67,7 +67,7 @@
                          policy: auto-quarantine │ execution guard │ warn ◀┘
                                                                            │
                                    history/UI events ◀─ hooks              ▼
-                                                              outbox (SQLite) ─▶ Telegram Bot API (user's own bot)
+                                                              outbox (SQLite) ─▶ Telegram Bot API (the shared SENTRIX bot via the relay, or the user's own bot)
  bot getUpdates ─▶ owner check ─▶ isolated temp download ─▶ scan ─▶ reply     (separate thread; never alters a verdict)
 ```
 

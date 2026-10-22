@@ -18,8 +18,8 @@ SENTRIX source. It is separate from the bot: either can be off while the other w
 3. SENTRIX is now an extra device on the account. TDLib delivers each incoming message. For a file attachment SENTRIX has,
    before downloading anything, only its **name, size, type and the chat category**.
 4. Eligible files are downloaded into an isolated folder, checked by the same real engine (ClamAV, heuristics, archive
-   inspection), and the **downloaded copy is deleted whatever the result**. A report goes to the user's bot according to their
-   notification preferences.
+   inspection), and the **downloaded copy is deleted whatever the result**. A report goes to the user's private chat with the SENTRIX bot (through the relay, see [HOSTED_BOT.md](HOSTED_BOT.md))
+   or to their own bot, according to their notification preferences. Only the text of the result leaves the computer.
 5. Files that cannot be checked are reported **UNABLE TO VERIFY** with the reason. Never clean.
 
 ## What is and is not covered

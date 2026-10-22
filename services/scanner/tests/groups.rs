@@ -143,10 +143,13 @@ fn report_is_for_administrators_only_counts_only_and_never_mixes_groups() {
     assert!(until(15, || r.mock.texts_in(A).len() > mid));
     assert!(r.mock.texts_in(A).last().unwrap().contains("Only group administrators"));
     // This group's administrator gets this group's numbers only.
+    let last_private = r.mock.texts_in(CHAT).len();
     let last = r.mock.texts_in(A).len();
     r.mock.add_group_text(n + 2, A, 22, ADMIN_A, "/report");
+    assert!(until(15, || r.mock.texts_in(CHAT).len() > last_private), "the summary goes to the owner's private chat");
     assert!(until(15, || r.mock.texts_in(A).len() > last));
-    let t = r.mock.texts_in(A).last().unwrap().clone();
+    assert!(r.mock.texts_in(A).last().unwrap().contains("sent to you privately"), "the group only learns that it was sent privately");
+    let t = r.mock.texts_in(CHAT).last().unwrap().clone();
     assert!(t.contains("Security report") && t.contains("this group only"), "{t}");
     assert!(t.contains("All time: 0 scanned, 0 malicious"), "group B's malicious scan must not appear in group A's report: {t}");
     assert!(!t.contains("invoice") && !t.contains(".exe"), "counts only: no file names");
@@ -226,10 +229,12 @@ fn a_file_that_could_not_be_checked_is_never_reported_as_clean() {
     r.mock.add_group(A, &[ADMIN_A], false, false);
     let n = protect(&r, A, ADMIN_A, 1);
     r.mock.add_group_document(n, A, 50, MEMBER, "invoice.pdf", b"%PDF-1.4 hello".to_vec(), None);
-    assert!(until(20, || r.mock.texts_in(A).iter().any(|t| t.contains("invoice.pdf"))));
-    let msg = r.mock.texts_in(A).into_iter().find(|t| t.contains("invoice.pdf")).unwrap();
+    assert!(until(20, || r.mock.texts_in(CHAT).iter().any(|t| t.contains("invoice.pdf"))));
+    let msg = r.mock.texts_in(CHAT).into_iter().find(|t| t.contains("invoice.pdf")).unwrap();
     assert!(msg.contains("could not be fully checked") && msg.contains("Not known to be safe"), "{msg}");
     assert!(!msg.to_lowercase().contains("no known threat") && !msg.contains("CLEAN"), "an unchecked file must not look safe: {msg}");
+    assert!(!r.mock.texts_in(A).iter().any(|t| t.contains("invoice.pdf")), "scan results are never posted in the group");
+    assert!(msg.contains("Group:"), "the private report says which group it is about: {msg}");
     let st = r.store.group_stats(A, 0).unwrap();
     assert_eq!((st.threats, st.unverified), (0, 1));
     r.svc.stop();
@@ -244,11 +249,12 @@ fn oversized_and_inaccessible_files_are_reported_as_unchecked() {
     r.mock.add_group_document(n, A, 60, MEMBER, "huge.iso", b"x".to_vec(), Some(21 * 1024 * 1024));
     // Telegram refuses to serve this one.
     r.mock.add_group_document_gone(n + 1, A, 61, MEMBER, "expired.zip");
-    assert!(until(20, || r.mock.texts_in(A).iter().any(|t| t.contains("huge.iso")) && r.mock.texts_in(A).iter().any(|t| t.contains("expired.zip"))));
-    let huge = r.mock.texts_in(A).into_iter().find(|t| t.contains("huge.iso")).unwrap();
-    let gone = r.mock.texts_in(A).into_iter().find(|t| t.contains("expired.zip")).unwrap();
+    assert!(until(20, || r.mock.texts_in(CHAT).iter().any(|t| t.contains("huge.iso")) && r.mock.texts_in(CHAT).iter().any(|t| t.contains("expired.zip"))));
+    let huge = r.mock.texts_in(CHAT).into_iter().find(|t| t.contains("huge.iso")).unwrap();
+    let gone = r.mock.texts_in(CHAT).into_iter().find(|t| t.contains("expired.zip")).unwrap();
     assert!(huge.contains("larger than 20 MB") && huge.contains("not checked"));
     assert!(gone.contains("could not be retrieved") && gone.contains("not checked"));
+    assert!(!r.mock.texts_in(A).iter().any(|t| t.contains("huge.iso") || t.contains("expired.zip")), "nothing about these files is posted in the group");
     let st = r.store.group_stats(A, 0).unwrap();
     assert_eq!((st.skipped, st.errors, st.scans), (1, 1, 0), "{st:?}");
     r.svc.stop();
@@ -262,9 +268,9 @@ fn redelivered_messages_are_handled_once() {
     // Telegram can deliver the same message under a new update id (e.g. after a webhook/poller handover).
     r.mock.add_group_document(n, A, 70, MEMBER, "dup.zip", b"PK".to_vec(), None);
     r.mock.add_group_document(n + 1, A, 70, MEMBER, "dup.zip", b"PK".to_vec(), None);
-    assert!(until(20, || r.mock.texts_in(A).iter().any(|t| t.contains("dup.zip"))));
+    assert!(until(20, || r.mock.texts_in(CHAT).iter().any(|t| t.contains("dup.zip"))));
     std::thread::sleep(Duration::from_secs(3));
-    assert_eq!(r.mock.texts_in(A).iter().filter(|t| t.contains("dup.zip")).count(), 1, "one message, one result");
+    assert_eq!(r.mock.texts_in(CHAT).iter().filter(|t| t.contains("dup.zip")).count(), 1, "one message, one result");
     let rows: i64 = r.store.group_stats(A, 0).unwrap().unverified;
     assert_eq!(rows, 1);
     r.svc.stop();
@@ -285,7 +291,7 @@ fn a_flood_of_files_is_rate_limited_and_the_skipped_ones_are_declared() {
     let s = r.store.group_stats(A, 0).unwrap();
     assert!(s.skipped >= 4, "files beyond the per-minute limit must be skipped, not silently queued: {s:?}");
     // Delivery is paced by the outbox (about one message a second), so give it time to reach the group.
-    assert!(until(40, || r.mock.texts_in(A).iter().any(|t| t.contains("skipped and not checked"))), "the group must be told that some files were not checked");
+    assert!(until(40, || r.mock.texts_in(CHAT).iter().any(|t| t.contains("skipped and not checked"))), "the owner must be told that some files were not checked");
     r.svc.stop();
 }
 
@@ -403,9 +409,11 @@ fn real_engine_malicious_file_alert_and_consented_deletion() {
     let mut n = protect(&r, A, ADMIN_A, 1);
     r.mock.add_group_document(n, A, 500, MEMBER, "invoice.zip", zip.clone(), None);
     n += 1;
-    assert!(until(60, || r.mock.texts_in(A).iter().any(|t| t.contains("MALICIOUS"))), "{:?}", r.mock.texts_in(A));
-    let alert = r.mock.texts_in(A).into_iter().find(|t| t.contains("MALICIOUS")).unwrap();
+    assert!(until(60, || r.mock.texts_in(CHAT).iter().any(|t| t.contains("MALICIOUS"))), "{:?}", r.mock.texts_in(CHAT));
+    let alert = r.mock.texts_in(CHAT).into_iter().find(|t| t.contains("MALICIOUS")).unwrap();
     assert!(alert.contains("Eicar") && alert.contains("Do not open it"), "{alert}");
+    assert!(alert.contains("Group:"), "the private alert names the group: {alert}");
+    assert!(!r.mock.texts_in(A).iter().any(|t| t.contains("MALICIOUS")), "the alert is never posted in the group itself");
     assert!(r.mock.deleted().is_empty(), "deletion is off by default");
     assert_eq!(r.store.group_stats(A, 0).unwrap().threats, 1);
 
@@ -427,12 +435,12 @@ fn real_engine_malicious_file_alert_and_consented_deletion() {
     r.mock.add_group_document(n, A, 502, MEMBER, "invoice2.zip", zip.clone(), None);
     n += 1;
     assert!(until(60, || r.mock.deleted().contains(&(A, 502))), "after explicit consent the malicious message must be deleted");
-    assert!(until(20, || r.mock.texts_in(A).iter().any(|t| t.contains("invoice2.zip") && t.contains("was deleted"))));
+    assert!(until(20, || r.mock.texts_in(CHAT).iter().any(|t| t.contains("invoice2.zip") && t.contains("was deleted"))));
 
     // The permission disappears: the deletion fails, and the alert says so instead of claiming success.
     r.mock.set_bot_can_delete(A, false);
     r.mock.add_group_document(n, A, 503, MEMBER, "invoice3.zip", zip, None);
-    assert!(until(60, || r.mock.texts_in(A).iter().any(|t| t.contains("invoice3.zip") && t.contains("could not delete"))), "{:?}", r.mock.texts_in(A));
+    assert!(until(60, || r.mock.texts_in(CHAT).iter().any(|t| t.contains("invoice3.zip") && t.contains("could not delete"))), "{:?}", r.mock.texts_in(CHAT));
     assert!(!r.mock.deleted().contains(&(A, 503)));
     r.svc.stop();
     println!("[ok] real engine: alert, deletion off by default, B untouched, consented deletion, failure reported honestly");
@@ -447,8 +455,8 @@ fn real_engine_clean_file_is_clean_only_when_the_engine_completed() {
     r.mock.add_group_text(n, A, n, ADMIN_A, "/setup clean on");
     let n = n + 1;
     r.mock.add_group_document(n, A, 600, MEMBER, "notes.txt", b"meeting notes\n".to_vec(), None);
-    assert!(until(60, || r.mock.texts_in(A).iter().any(|t| t.contains("notes.txt"))), "{:?}", r.mock.texts_in(A));
-    let msg = r.mock.texts_in(A).into_iter().find(|t| t.contains("notes.txt")).unwrap();
+    assert!(until(60, || r.mock.texts_in(CHAT).iter().any(|t| t.contains("notes.txt"))), "{:?}", r.mock.texts_in(CHAT));
+    let msg = r.mock.texts_in(CHAT).into_iter().find(|t| t.contains("notes.txt")).unwrap();
     assert!(msg.contains("no known threat") && msg.contains("not a guarantee"), "{msg}");
     assert!(r.mock.deleted().is_empty());
     let _ = now_ms();

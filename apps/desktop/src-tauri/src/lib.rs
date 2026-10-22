@@ -1,5 +1,6 @@
 mod account;
 mod commands;
+mod hosted;
 pub mod portal;
 mod protection;
 mod state;
@@ -7,6 +8,7 @@ mod sync;
 
 use account::*;
 use commands::*;
+use hosted::*;
 use protection::*;
 use sentrix_core::clamav::ClamEngine;
 use sentrix_core::quarantine::Quarantine;
@@ -26,6 +28,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
@@ -59,6 +62,9 @@ pub fn run() {
                 jobs,
                 service,
                 tg_vault: TokenVault::new(&data_dir),
+                relay_vault: sentrix_core::secret::SecretFile::new(&data_dir, "relay.token"),
+                endpoints: hosted::resolve_endpoints(&exe_dir),
+                relay: Default::default(),
                 account,
                 notified: Mutex::new(HashSet::new()),
             });
@@ -82,6 +88,15 @@ pub fn run() {
                         s.account.resume();
                     }
                     let _ = h.emit("engine-state-changed", ());
+                });
+            }
+            // Is this app still linked to the SENTRIX bot, and can the bot reach the person? Checked about once a minute.
+            {
+                let (h, s) = (handle.clone(), st.clone());
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(20));
+                    hosted::check_link(&h, &s);
+                    std::thread::sleep(std::time::Duration::from_secs(40));
                 });
             }
             // Removable drives can appear after start-up; re-evaluate the watch list periodically if enabled.
@@ -159,6 +174,9 @@ pub fn run() {
             tg_detect_desktop,
             tg_set_desktop_folder,
             tg_set_group_shield,
+            tg_relay_link,
+            tg_relay_unlink,
+            tg_relay_test,
             tg_account_status,
             tg_account_connect,
             tg_account_disconnect,

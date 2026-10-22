@@ -5,7 +5,8 @@ the app labels them separately. Read the **coverage** column before relying on a
 
 | Feature | What it does | Needs | Status |
 |---|---|---|---|
-| **Personal bot reports** | Sends scan results to a bot **you** created, in a chat only you can read | A bot token from @BotFather | Implemented. Tested against a local Bot API **test double**; **not** tested against live Telegram (no token was available) |
+| **Reports through the SENTRIX bot** | Sends scan results to your private chat with the shared SENTRIX bot (via a relay), after you link the app with a one-time code | Press Start in the bot, then link the app | Implemented; tested with a test double and a real relay, **not** live Telegram. See [HOSTED_BOT.md](HOSTED_BOT.md) |
+| **Personal bot reports (advanced)** | Sends scan results to a bot **you** created, in a chat only you can read | A bot token from @BotFather | Implemented. Tested against a local Bot API **test double**; **not** tested against live Telegram (no token was available) |
 | **Files sent to your bot** | You send a file to your bot; SENTRIX scans it locally and replies | The bot above | Implemented. Same test status |
 | **Group Shield** | Scans files posted in groups the bot was added to and posts results there; optional consented deletion of malicious messages | The bot, the owner's master switch, a group administrator's `/setup on` | Implemented; tested against the test double and real ClamAV. See [GROUP_SHIELD.md](GROUP_SHIELD.md) |
 | **Telegram Desktop folder** | Files Telegram Desktop saved to disk are scanned like any download and labelled "Telegram Desktop" | Telegram Desktop installed | Implemented; tested with real ClamAV in a folder that stands in for Telegram's download folder |
@@ -92,18 +93,16 @@ temporary directory, size-checked against both Telegram's declared size and the 
 messages, and stops delivery and submissions. To make the old token useless everywhere, also send `/revoke` to
 @BotFather. Deleting the SENTRIX data folder removes everything else it stored.
 
-## Shared bot versus each customer's own bot
+## The shared SENTRIX bot (the default)
 
-The latest product brief asks for the existing SENTRIX bot to be the default shared bot, with customer-owned bots optional.
-**That is not what this repository contains.** Phase 2 built per-customer bots: the customer creates the bot with @BotFather,
-its token is DPAPI-protected on their own PC, and one polling worker per installation handles their private chat and their
-groups. The console never sees a token or a Telegram update.
+SENTRIX has its own bot. Customers do not create one: they find it, press Start and choose **Protect a group** or
+**Protect my account**. Every result arrives in their own private chat with the bot, never in a group. The service that runs
+the bot is `sentrix-botd`; the desktop app links to it with a one-time code. See [HOSTED_BOT.md](HOSTED_BOT.md) for the flow,
+the relay, what is shared, the BotFather settings and what still has to be done by the operator. It is **tested against a
+Telegram test double, not live Telegram**.
 
-A shared bot would mean a hosted service that holds one token and receives every customer's group updates. Files would have to
-be downloaded and scanned by that service (so customers' files leave their PCs), reports routed per customer, and a Telegram
-account session would never be safe there. That is a separate product decision with privacy, hosting and cost consequences, so
-it has **not** been started. Until it is, the per-customer bot remains the only bot path, and it is what both Group Shield and
-personal-account reports use.
+Creating your own bot (the older flow in the table above) is still available as an *advanced* option in the app, for people who
+want a private bot only they control. It and the shared bot cannot be used at the same time on one computer.
 
 ## Account-level protection
 

@@ -10,7 +10,7 @@ export default function Privacy() {
       <div className="mt-8 space-y-8 text-muted [&_h2]:mb-2 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-ink [&_li]:mt-1.5 [&_ul]:list-disc [&_ul]:pl-6">
         <section>
           <h2>The short version</h2>
-          <p>SENTRIX scans files on your computer. File contents are never uploaded. Nothing leaves your device unless you enroll it with an organization or turn on optional health reporting.</p>
+          <p>SENTRIX scans files on your computer, and nothing from them is uploaded. Two optional Telegram features send something out, and only if you turn them on: results go to you through the SENTRIX Telegram bot, and if you ask the bot to protect a Telegram group, files posted in that group are checked on SENTRIX&apos;s server and deleted straight away. Organization enrollment and health reporting are also optional.</p>
         </section>
         <section>
           <h2>What stays on your device</h2>
@@ -20,6 +20,8 @@ export default function Privacy() {
           <h2>What leaves your device</h2>
           <ul>
             <li><strong className="text-ink">Signature downloads.</strong> SENTRIX fetches ClamAV malware signatures from ClamAV&apos;s public servers. These requests contain no information about your files. Your IP address is visible to those servers, as with any download.</li>
+            <li><strong className="text-ink">Telegram results (optional).</strong> If you link the app to the SENTRIX bot, the text of each result (file name, verdict, detection name, time) is sent through SENTRIX&apos;s relay to your private chat with the bot. Telegram can read what is sent in that chat. Files stay on your computer. Your Telegram login, phone number and password are never asked for and never sent to SENTRIX.</li>
+            <li><strong className="text-ink">Telegram group protection (optional).</strong> If you protect a group through the bot, documents (up to 20 MB) posted in that group are downloaded by SENTRIX&apos;s server, checked, and deleted straight away. The result goes only to your private chat with the bot, never into the group. SENTRIX stores who protects which group (Telegram user and group identifiers, the group&apos;s name) and, for 30 days, the fingerprint (SHA-256), size and verdict of each file it checked. It does not keep the files or the messages. Tell the people in your group that its files are being checked.</li>
             <li><strong className="text-ink">Application updates</strong> (once enabled): a request to our update server containing your app version and platform.</li>
             <li><strong className="text-ink">Organization enrollment (optional).</strong> If an administrator gives you an enrollment code and you enroll, the device reports: host name, operating system and version, app and engine versions, protection state, signature age, and last check-in time. With health reporting on, it also sends scan counts and, per finding, a file hash and verdict. File names are sent only if your organization&apos;s policy explicitly allows it. File contents are never sent.</li>
           </ul>

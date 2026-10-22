@@ -192,10 +192,54 @@ pub struct Incoming {
     /// Set when an administrator posts anonymously (the "sender" is the group itself). The person cannot be identified.
     pub anonymous_admin: bool,
     pub member_change: Option<MemberChange>,
+    /// First name of the sender, for greetings only (never stored).
+    pub from_name: Option<String>,
+    /// A tap on an inline button.
+    pub callback: Option<Callback>,
     pub text: Option<String>,
     pub document: Option<Document>,
     /// A photo/video/audio/etc. was sent instead of a document (Telegram recompresses photos, so they are not scanned).
     pub other_media: bool,
+}
+
+/// A tap on an inline button: `id` must be answered, `data` is what the button carried.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Callback {
+    pub id: String,
+    pub data: String,
+}
+
+/// An inline button under a message.
+#[derive(Debug, Clone)]
+pub enum Button {
+    Callback { text: String, data: String },
+    Url { text: String, url: String },
+}
+
+impl Button {
+    pub fn callback(text: &str, data: &str) -> Button {
+        Button::Callback { text: text.into(), data: data.into() }
+    }
+    pub fn url(text: &str, url: &str) -> Button {
+        Button::Url { text: text.into(), url: url.into() }
+    }
+    fn json(&self) -> Value {
+        match self {
+            Button::Callback { text, data } => json!({ "text": text, "callback_data": data }),
+            Button::Url { text, url } => json!({ "text": text, "url": url }),
+        }
+    }
+}
+
+/// Anything that can deliver a queued report: the bot directly, or the relay in front of a shared bot.
+pub trait Courier: Send + Sync {
+    fn send_reply(&self, chat_id: i64, text: &str, reply_to: Option<i64>) -> Result<i64, TgError>;
+}
+
+impl Courier for BotClient {
+    fn send_reply(&self, chat_id: i64, text: &str, reply_to: Option<i64>) -> Result<i64, TgError> {
+        BotClient::send_reply(self, chat_id, text, reply_to)
+    }
 }
 
 pub struct BotClient {
@@ -262,6 +306,24 @@ impl BotClient {
         Ok(r["message_id"].as_i64().unwrap_or(0))
     }
 
+    /// A message with inline buttons (rows of buttons).
+    pub fn send_buttons(&self, chat_id: i64, text: &str, rows: &[Vec<Button>]) -> Result<i64, TgError> {
+        let text: String = text.chars().take(MAX_MESSAGE_CHARS).collect();
+        let kb: Vec<Vec<Value>> = rows.iter().map(|r| r.iter().map(Button::json).collect()).collect();
+        let body = json!({ "chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": true, "reply_markup": { "inline_keyboard": kb } });
+        let r = self.call("sendMessage", &body, None)?;
+        Ok(r["message_id"].as_i64().unwrap_or(0))
+    }
+
+    /// Acknowledge a button tap (stops the spinner on the user's screen).
+    pub fn answer_callback(&self, callback_id: &str, text: Option<&str>) -> Result<(), TgError> {
+        let mut body = json!({ "callback_query_id": callback_id });
+        if let Some(t) = text {
+            body["text"] = json!(t.chars().take(180).collect::<String>());
+        }
+        self.call("answerCallbackQuery", &body, None).map(|_| ())
+    }
+
     /// Ask Telegram for a user's standing in a chat. This is the only source of truth for "is this person an admin".
     pub fn get_chat_member(&self, chat_id: i64, user_id: i64) -> Result<Member, TgError> {
         let r = self.call("getChatMember", &json!({ "chat_id": chat_id, "user_id": user_id }), None)?;
@@ -279,7 +341,7 @@ impl BotClient {
 
     /// Long-poll for updates. Pass `offset = last_update_id + 1` to acknowledge earlier ones.
     pub fn get_updates(&self, offset: Option<i64>, timeout_s: u64, limit: u32) -> Result<Vec<Incoming>, TgError> {
-        let mut body = json!({ "timeout": timeout_s, "limit": limit, "allowed_updates": ["message", "my_chat_member"] });
+        let mut body = json!({ "timeout": timeout_s, "limit": limit, "allowed_updates": ["message", "my_chat_member", "callback_query"] });
         if let Some(o) = offset {
             body["offset"] = json!(o);
         }
@@ -332,6 +394,26 @@ fn parse_update(u: &Value) -> Option<Incoming> {
             from_id: c["from"]["id"].as_i64(),
             anonymous_admin: false,
             member_change: Some(MemberChange { new_status: c["new_chat_member"]["status"].as_str().unwrap_or("").to_string(), old_status: c["old_chat_member"]["status"].as_str().unwrap_or("").to_string() }),
+            from_name: None,
+            callback: None,
+            text: None,
+            document: None,
+            other_media: false,
+        });
+    }
+    if let Some(c) = u.get("callback_query") {
+        let m = &c["message"];
+        return Some(Incoming {
+            update_id,
+            chat_id: m["chat"]["id"].as_i64()?,
+            chat_type: m["chat"]["type"].as_str().unwrap_or("").to_string(),
+            chat_title: m["chat"]["title"].as_str().map(String::from),
+            message_id: m["message_id"].as_i64(),
+            from_id: c["from"]["id"].as_i64(),
+            anonymous_admin: false,
+            member_change: None,
+            from_name: c["from"]["first_name"].as_str().map(String::from),
+            callback: Some(Callback { id: c["id"].as_str()?.to_string(), data: c["data"].as_str().unwrap_or("").chars().take(64).collect() }),
             text: None,
             document: None,
             other_media: false,
@@ -352,6 +434,8 @@ fn parse_update(u: &Value) -> Option<Incoming> {
         from_id: m["from"]["id"].as_i64(),
         anonymous_admin: m["sender_chat"]["id"].as_i64() == Some(chat_id),
         member_change: None,
+        from_name: m["from"]["first_name"].as_str().map(String::from),
+        callback: None,
         // A file's caption is its text; commands only ever come from `text`.
         text: m["text"].as_str().map(String::from),
         other_media: doc.is_none() && ["photo", "video", "audio", "voice", "video_note", "animation", "sticker"].iter().any(|k| m.get(*k).is_some()),
@@ -405,7 +489,7 @@ impl TokenVault {
 
 /// Characters that let a name lie about itself: ASCII control codes and Unicode bidirectional overrides/isolates
 /// (e.g. U+202E "right-to-left override" makes `exe.txt` display as `txt.exe`), plus zero-width characters.
-fn is_deceptive(c: char) -> bool {
+pub(crate) fn is_deceptive(c: char) -> bool {
     c.is_control() || matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200B}'..='\u{200F}' | '\u{FEFF}' | '\u{061C}')
 }
 

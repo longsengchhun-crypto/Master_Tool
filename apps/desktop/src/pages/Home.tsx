@@ -1,18 +1,12 @@
 import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { AlertTriangle, ArrowRight, CheckCircle2, FileSearch, HardDrive, ShieldAlert } from 'lucide-react';
+import { ArrowRight, FileSearch, HardDrive } from 'lucide-react';
 import { useApp } from '../lib/app';
 import { api, errText } from '../lib/api';
 import { ago, splitPath } from '../lib/format';
 import { usePolled } from '../lib/hooks';
-import type { ScanReport } from '../lib/types';
-import { Button, Card, Empty, Notice, Section, VerdictBadge } from '../components/ui';
-
-const TONE = {
-  protected: { bar: 'bg-ok', tint: 'bg-okbg', icon: 'text-ok', Icon: CheckCircle2, title: "You're protected" },
-  attention: { bar: 'bg-warn', tint: 'bg-warnbg', icon: 'text-warn', Icon: AlertTriangle, title: 'Needs a quick look' },
-  at_risk: { bar: 'bg-danger', tint: 'bg-dangerbg', icon: 'text-danger', Icon: ShieldAlert, title: 'Not fully protected' },
-} as const;
+import type { ScanReport, Verdict } from '../lib/types';
+import { Button, Notice } from '../components/ui';
 
 interface Item {
   key: string;
@@ -21,6 +15,9 @@ interface Item {
   action: string;
   run: () => void | Promise<void>;
 }
+
+const DOT: Record<Verdict, string> = { MALICIOUS: 'bg-danger', SUSPICIOUS: 'bg-warn', CLEAN: 'bg-ok', UNABLE_TO_VERIFY: 'bg-strong', PENDING: 'bg-strong' };
+const WORD: Record<Verdict, string> = { MALICIOUS: 'was dangerous', SUSPICIOUS: 'looks suspicious', CLEAN: 'came back clean', UNABLE_TO_VERIFY: 'could not be fully checked', PENDING: 'is being checked' };
 
 export function Home() {
   const { status, statusError, startScan, requestFullScan, go, openReport, refresh, toast, scan, danger } = useApp();
@@ -33,10 +30,10 @@ export function Home() {
   }
   // A confirmed-malicious file that is still on disk outranks everything else.
   const lvl = danger.length ? 'at_risk' : status.protection.level;
-  const T = danger.length ? { ...TONE.at_risk, title: 'Action needed' } : TONE[lvl];
   const eng = status.engine;
   const h = health.data;
   const t = tg.data;
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
 
   const pickFiles = async () => {
     const sel = await open({ multiple: true, title: 'Choose files to scan' });
@@ -55,89 +52,141 @@ export function Home() {
     }
   };
 
-  // Only things the user can act on. Everything else lives on the page it belongs to.
+  // Only things the person can act on. Everything else lives on the page it belongs to.
   const items: Item[] = [];
   if (danger.length)
     items.push({ key: 'danger', tone: 'danger', text: `${danger.length} dangerous file${danger.length > 1 ? 's' : ''} found. Review and quarantine ${danger.length > 1 ? 'them' : 'it'}.`, action: 'Review', run: () => { openReport(danger[0].id); } });
   if (eng.state === 'unavailable' || eng.state === 'degraded' || !status.lastSignatureUpdate)
-    items.push({ key: 'engine', tone: 'warn', text: eng.state === 'unavailable' ? 'Malware definitions are not installed, so files cannot be called safe.' : 'Malware definitions are out of date.', action: 'Update now', run: act('engine', async () => { const r = await api.updateProtection(); toast(r.ok ? 'ok' : 'danger', r.message); }) });
+    items.push({ key: 'engine', tone: 'warn', text: eng.state === 'unavailable' ? 'The malware definitions are not installed, so files cannot be called safe.' : 'The malware definitions are out of date.', action: 'Update now', run: act('engine', async () => { const r = await api.updateProtection(); toast(r.ok ? 'ok' : 'danger', r.message); }) });
   if (!status.settings.realtimeMonitoring)
-    items.push({ key: 'rt', tone: 'warn', text: 'Automatic scanning of new downloads is off.', action: 'Turn on', run: act('rt', () => api.setSettings({ ...status.settings, realtimeMonitoring: true })) });
+    items.push({ key: 'rt', tone: 'warn', text: 'New downloads are not being scanned automatically.', action: 'Turn on', run: act('rt', () => api.setSettings({ ...status.settings, realtimeMonitoring: true })) });
   else if (h && !h.monitorRunning)
-    items.push({ key: 'monitor', tone: 'danger', text: 'Automatic scanning is on but no folder is being watched.', action: 'Fix', run: () => go('protection') });
+    items.push({ key: 'monitor', tone: 'danger', text: 'Automatic scanning is on, but no folder is being watched.', action: 'Fix', run: () => go('protection') });
   if (h && h.queue.failed > 0)
-    items.push({ key: 'failed', tone: 'warn', text: `${h.queue.failed} file${h.queue.failed > 1 ? 's' : ''} could not be checked. They are not known to be safe.`, action: 'See files', run: () => go('protection') });
-  if (t && t.bot.configured && (t.bot.lastTestOk === false || t.bot.failed24h > 0))
-    items.push({ key: 'tg', tone: 'warn', text: 'Telegram reports are not getting through.', action: 'Check', run: () => go('telegram') });
+    items.push({ key: 'failed', tone: 'warn', text: `${h.queue.failed} file${h.queue.failed > 1 ? 's' : ''} could not be checked and ${h.queue.failed > 1 ? 'are' : 'is'} not known to be safe.`, action: 'See files', run: () => go('protection') });
+  if (t && (t.bot.configured && (t.bot.lastTestOk === false || t.bot.failed24h > 0)))
+    items.push({ key: 'tg', tone: 'warn', text: 'Telegram results are not getting through.', action: 'Check', run: () => go('telegram') });
+  if (t && t.relay.linked && (t.relay.reachable === false || t.relay.error))
+    items.push({ key: 'relay', tone: 'warn', text: 'The SENTRIX bot cannot reach you in Telegram, so results are not arriving.', action: 'Fix', run: () => go('telegram') });
+  if (t && t.account.state === 'expired')
+    items.push({ key: 'acct', tone: 'warn', text: 'Telegram ended the session, so files sent to your account are not being checked.', action: 'Sign in again', run: () => go('telegram') });
+
+  const headline = danger.length ? 'A dangerous file needs you.' : lvl === 'protected' ? 'Everything is being checked.' : lvl === 'attention' ? 'Protection has a gap.' : 'Files cannot be called safe right now.';
+  const sub = danger.length
+    ? `${danger.length} file${danger.length > 1 ? 's' : ''} on this computer ${danger.length > 1 ? 'were' : 'was'} identified as malware. Nothing was deleted without asking you.`
+    : lvl === 'protected'
+      ? 'New files in your watched folders are scanned as they arrive. No scanner is perfect, so stay careful with files you do not know.'
+      : (status.protection.reasons[0] ?? status.protection.headline);
+  const edge = danger.length || lvl === 'at_risk' ? 'border-danger' : lvl === 'attention' ? 'border-warn' : 'border-ok';
+
+  const reportsLinked = !!t && (t.relay.linked || t.bot.configured);
+  const watching = h ? h.roots.filter((r) => r.watching).length : null;
+  const sigAge = eng.database_age_hours;
 
   return (
-    <div className="space-y-6">
-      <div className="panel flex flex-wrap items-center gap-6 overflow-hidden rounded-xl p-6">
-        <span className={`grid size-16 shrink-0 place-items-center rounded-full ${T.tint}`}>
-          <T.Icon className={`size-8 ${T.icon}`} strokeWidth={1.7} aria-hidden />
-        </span>
-        <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-semibold tracking-tight text-ink">{T.title}</h1>
-          <p className="mt-0.5 text-sm text-muted">{danger.length ? 'A dangerous file was found on this computer. Review it below.' : lvl === 'protected' ? 'Your files are being checked. No scanner is perfect, so stay careful with unknown files.' : status.protection.reasons[0] ?? status.protection.headline}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="primary" onClick={pickFiles} disabled={scan.running}>
-            <FileSearch className="size-4" /> Scan files
-          </Button>
-          <Button onClick={requestFullScan} disabled={scan.running}>
-            <HardDrive className="size-4" /> Full scan
-          </Button>
-        </div>
+    <div className="grid gap-x-10 gap-y-8 lg:grid-cols-[minmax(0,1fr)_17rem]">
+      <div className="min-w-0 space-y-8">
+        <header className={`border-l-4 ${edge} pl-5`}>
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted">{today}</p>
+          <h1 className="mt-1.5 text-[1.7rem] font-semibold leading-tight tracking-tight text-ink">{headline}</h1>
+          <p className="mt-2 max-w-xl text-sm text-muted">{sub}</p>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Button variant="primary" onClick={pickFiles} disabled={scan.running}>
+              <FileSearch className="size-4" /> Scan files
+            </Button>
+            <Button variant="ghost" onClick={requestFullScan} disabled={scan.running}>
+              <HardDrive className="size-4" /> Scan the whole computer
+            </Button>
+          </div>
+        </header>
+
+        {items.length > 0 && (
+          <section aria-label="What needs you">
+            <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">What needs you</h2>
+            <ul className="mt-3 divide-y divide-line border-y border-line">
+              {items.map((i) => (
+                <li key={i.key} className="flex items-center gap-4 py-3">
+                  <span className={`size-2 shrink-0 rounded-full ${i.tone === 'danger' ? 'bg-danger' : 'bg-warn'}`} aria-hidden />
+                  <span className="min-w-0 flex-1 text-sm text-ink">{i.text}</span>
+                  <Button variant={i.tone === 'danger' ? 'primary' : 'secondary'} busy={busy === i.key} onClick={i.run}>{i.action}</Button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        <section aria-label="Recent activity">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Recent activity</h2>
+            <button className="inline-flex items-center gap-1 text-sm text-muted hover:text-ink" onClick={() => go('history')}>All history <ArrowRight className="size-3.5" aria-hidden /></button>
+          </div>
+          <Timeline onOpen={openReport} />
+        </section>
       </div>
 
-      <section aria-label="Needs attention">
-        <h2 className="mb-2 text-sm font-semibold text-ink">Needs attention</h2>
-        {items.length === 0 ? (
-          <Card className="flex items-center gap-3 px-5 py-4 text-sm text-muted">
-            <CheckCircle2 className="size-5 text-ok" aria-hidden /> Nothing needs your attention.
-          </Card>
-        ) : (
-          <Card className="divide-y divide-line">
-            {items.map((i) => (
-              <div key={i.key} className="flex items-center gap-4 px-5 py-3.5">
-                <span className={`size-2 shrink-0 rounded-full ${i.tone === 'danger' ? 'bg-danger' : 'bg-warn'}`} aria-hidden />
-                <span className="min-w-0 flex-1 text-sm text-ink">{i.text}</span>
-                <Button variant={i.tone === 'danger' ? 'primary' : 'secondary'} busy={busy === i.key} onClick={i.run}>{i.action}</Button>
-              </div>
-            ))}
-          </Card>
-        )}
-      </section>
+      <aside aria-label="At a glance" className="space-y-6 lg:pt-1">
+        <div>
+          <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">At a glance</h2>
+          <dl className="mt-3 space-y-3.5 text-sm">
+            <Fact k="Scanner" v={{ running: 'Running', degraded: 'Running, definitions old', stopped: 'Stopped', unavailable: 'Not available' }[eng.state]} tone={eng.state === 'running' ? undefined : eng.state === 'unavailable' ? 'danger' : 'warn'} />
+            <Fact k="Definitions" v={sigAge === null ? 'Not installed' : sigAge < 1 ? 'Updated within the hour' : sigAge < 48 ? `${Math.floor(sigAge)} hours old` : `${Math.floor(sigAge / 24)} days old`} tone={sigAge === null ? 'danger' : sigAge >= 48 ? 'warn' : undefined} />
+            <Fact k="Watching" v={watching === null ? '…' : status.settings.realtimeMonitoring ? `${watching} folder${watching === 1 ? '' : 's'}` : 'Switched off'} tone={status.settings.realtimeMonitoring && watching === 0 ? 'danger' : !status.settings.realtimeMonitoring ? 'warn' : undefined} />
+            <Fact k="Files checked" v={status.stats.scansTotal.toLocaleString()} />
+            <Fact k="Quarantined" v={String(status.stats.quarantined)} />
+          </dl>
+        </div>
 
-      <Section title="Recent scans" aside={<Button variant="ghost" className="-mr-3 h-8" onClick={() => go('history')}>See all <ArrowRight className="size-3.5" /></Button>}>
-        <RecentList onOpen={openReport} />
-      </Section>
+        <div className="border-t border-line pt-5">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Telegram</h2>
+          {!t ? (
+            <p className="mt-3 text-sm text-muted">…</p>
+          ) : reportsLinked ? (
+            <p className="mt-3 text-sm text-ink">
+              Results go to your chat with {t.relay.linked && t.relay.botUsername ? `@${t.relay.botUsername}` : t.bot.username ? `@${t.bot.username}` : 'your bot'}.
+              <button className="mt-1 block text-muted hover:text-ink" onClick={() => go('telegram')}>Manage Telegram</button>
+            </p>
+          ) : (
+            <div className="mt-3 text-sm">
+              <p className="text-muted">Get results on your phone, and protect your groups and account, through the SENTRIX bot.</p>
+              <Button className="mt-3" onClick={() => go('telegram')}>Connect Telegram</Button>
+            </div>
+          )}
+        </div>
+      </aside>
     </div>
   );
 }
 
-function RecentList({ onOpen }: { onOpen: (id: string) => void }) {
+function Fact({ k, v, tone }: { k: string; v: string; tone?: 'danger' | 'warn' }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-muted">{k}</dt>
+      <dd className={`text-right font-medium ${tone === 'danger' ? 'text-danger' : tone === 'warn' ? 'text-warn' : 'text-ink'}`}>{v}</dd>
+    </div>
+  );
+}
+
+function Timeline({ onOpen }: { onOpen: (id: string) => void }) {
   const [rows, setRows] = useState<ScanReport[] | null>(null);
   const { status } = useApp();
   useEffect(() => {
-    void api.history(5).then(setRows);
+    void api.history(6).then(setRows);
   }, [status?.stats.scansTotal]);
-  if (rows === null) return <div className="px-5 py-4 text-sm text-muted">Loading…</div>;
-  if (!rows.length) return <Empty title="No scans yet">Drop a file on this window, or press Scan files.</Empty>;
+  if (rows === null) return <p className="mt-3 text-sm text-muted">Loading…</p>;
+  if (!rows.length) return <p className="mt-3 max-w-md text-sm text-muted">Nothing has been checked yet. Drop a file on this window, or press Scan files, and the result will show up here.</p>;
   return (
-    <ul className="divide-y divide-line">
+    <ol className="relative mt-4 ml-1.5 space-y-0 border-l border-line">
       {rows.map((r) => (
-        <li key={r.id}>
-          <button onClick={() => onOpen(r.id)} className="flex w-full items-center gap-4 px-5 py-3 text-left transition-colors hover:bg-surface2">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-semibold text-ink">{r.file.name}</div>
-              <div className="truncate text-xs text-muted">{r.origin ?? splitPath(r.file.path)[0]}</div>
-            </div>
-            <VerdictBadge verdict={r.verdict} incomplete={!r.complete} />
-            <span className="w-20 text-right text-xs text-muted">{ago(r.finished_at)}</span>
+        <li key={r.id} className="relative pb-5 pl-6 last:pb-0">
+          <span className={`absolute -left-[5px] top-1.5 size-2.5 rounded-full ring-4 ring-[var(--bg)] ${DOT[r.verdict]}`} aria-hidden />
+          <button onClick={() => onOpen(r.id)} className="group block w-full text-left">
+            <span className="text-sm text-ink">
+              <span className="font-semibold group-hover:underline">{r.file.name}</span> {WORD[r.verdict]}{!r.complete && r.verdict !== 'UNABLE_TO_VERIFY' ? ' (partly checked)' : ''}
+            </span>
+            <span className="mt-0.5 block text-xs text-muted">{ago(r.finished_at)} · {r.origin ?? splitPath(r.file.path)[0]}</span>
           </button>
         </li>
       ))}
-    </ul>
+    </ol>
   );
 }

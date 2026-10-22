@@ -60,6 +60,10 @@ pub struct TelegramSettings {
     pub groups_allowed: bool,
     /// What the connected personal account is allowed to look at. The account session itself is never in settings.
     pub account: AccountSettings,
+    /// This app is linked to the person's chat with the shared SENTRIX bot (the token is in a protected file, never here).
+    pub relay_linked: bool,
+    pub relay_user: Option<String>,
+    pub relay_linked_at: Option<i64>,
 }
 
 /// Personal-account monitoring choices. Private chats on; groups, channels and media are opt-in.
@@ -81,7 +85,7 @@ impl Default for AccountSettings {
 
 impl Default for TelegramSettings {
     fn default() -> Self {
-        TelegramSettings { chat_id: None, bot_username: None, notify: NotifyPrefs::default(), accept_submissions: false, desktop_folder: None, bot_allowed: true, account_allowed: true, group_shield: false, groups_allowed: true, account: AccountSettings::default() }
+        TelegramSettings { chat_id: None, bot_username: None, notify: NotifyPrefs::default(), accept_submissions: false, desktop_folder: None, bot_allowed: true, account_allowed: true, group_shield: false, groups_allowed: true, account: AccountSettings::default(), relay_linked: false, relay_user: None, relay_linked_at: None }
     }
 }
 
@@ -253,6 +257,10 @@ pub struct AppState {
     pub jobs: Arc<JobStore>,
     pub service: Arc<ProtectionService>,
     pub tg_vault: TokenVault,
+    /// The device token for the shared SENTRIX bot's relay (protected for this Windows user).
+    pub relay_vault: sentrix_core::secret::SecretFile,
+    pub endpoints: Option<crate::hosted::Endpoints>,
+    pub relay: crate::hosted::RelayState,
     /// Personal Telegram account protection (TDLib). Separate from the bot: either can be off while the other works.
     pub account: Arc<sentrix_core::account_td::TdAccount>,
     /// Hashes already notified this session, to prevent notification spam.

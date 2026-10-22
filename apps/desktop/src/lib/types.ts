@@ -97,6 +97,7 @@ export interface Settings {
     accountAllowed: boolean;
     groupShield: boolean;
     groupsAllowed: boolean;
+    relayLinked: boolean;
   };
 }
 
@@ -294,6 +295,23 @@ export interface Detection {
   candidates: { path: string; exists: boolean; fileCount: number }[];
 }
 
+/** The shared SENTRIX bot: this app is linked to the person's own chat with it. */
+export interface RelayStatus {
+  /** This build knows where the shared bot is. */
+  available: boolean;
+  linked: boolean;
+  botUsername: string | null;
+  botLink: string | null;
+  userName: string | null;
+  linkedAt: number | null;
+  /** The bot can write to the person now. null = not checked yet. */
+  reachable: boolean | null;
+  checkedAt: number | null;
+  error: string | null;
+  /** The person unlinked this computer from the bot's own menu. */
+  removedRemotely: boolean;
+}
+
 export interface TelegramStatus {
   allowed: boolean;
   bot: {
@@ -314,6 +332,7 @@ export interface TelegramStatus {
   notify: NotifyPrefs;
   desktop: { detection: Detection; folder: string | null; exists: boolean; watching: boolean; error: string | null; scanned: number; threats: number };
   account: TgAccount;
+  relay: RelayStatus;
   groups: GroupsStatus;
   rejectedSubmissions: number;
   recentNotifications: OutboxRow[];

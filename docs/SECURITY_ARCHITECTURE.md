@@ -61,6 +61,9 @@
 | T37 | Group files treated as clean when they could not be seen or checked | Privacy-mode blindness is surfaced in `/status` and the app; oversized, inaccessible, encrypted or engine-less cases are UNABLE TO VERIFY / not checked, never clean | `a_file_that_could_not_be_checked_is_never_reported_as_clean` |
 | T38 | Group names, chat ids, member names or file names reach the console | Strict `groups` heartbeat schema (counts only); no such column exists; device detail/aggregates are tenant-scoped | `tests/security.test.ts` Group Shield block |
 | T32 | Console learns message content or secrets | Strict heartbeat schemas (counts/booleans only); org policy can disable bot/account features | `tests/security.test.ts` Phase 2 block |
+| T33 | One customer acts on another customer's groups, codes or linked computers through the shared bot | Every button, command and link is checked against the acting Telegram user id; a group is linked only by its one-time code, used by the person it was made for, who Telegram reports as an administrator there | `hosted` tests (link rules, pause/remove/list/unlink isolation, per-person report routing) |
+| T34 | A linked app is used to message someone else, or to inject links | A device token only ever writes to the person it was issued to (the request cannot name a chat); report text is reduced to three formatting tags; per-device rate limits; only the token hash is stored | `hosted` relay tests |
+| T35 | Guessing one-time link codes | 40-bit codes, single use, 10-minute expiry, rate limits per address and overall | `a_code_works_once_and_wrong_codes_are_rate_limited` |
 
 ## Out of scope / residual risk (see also [CHECKLIST.md](CHECKLIST.md))
 

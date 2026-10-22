@@ -1,29 +1,39 @@
 # SENTRIX Group Shield
 
-Group Shield scans files posted in Telegram **groups** that the owner's own bot was added to, and posts the result in the
-group. It extends the existing Telegram bot integration: the same bot token (DPAPI-protected on the owner's PC), the same
-single bot worker, the same outbox, the same scanner. There is no second bot, no second poller and no webhook.
+Group Shield checks files posted in Telegram **groups** and sends every result **privately** to the person who protects the
+group. **Nothing about a scan is ever posted in the group.** The group sees one line when protection starts, and the replies to
+commands people type there (`/status`, `/help`, ...).
 
-## Where it runs (read this first)
+## Two ways to run it
 
-SENTRIX has no central bot and no server-side scanner. Each customer connects **their own** bot (Telegram page), and that bot
-is polled by the desktop app on the customer's computer, which also does the scanning. Therefore:
+**1. The shared SENTRIX bot (the default).** The customer opens the SENTRIX bot, presses Start, chooses **Protect a group**, and
+Telegram's group picker adds the bot. The bot runs on SENTRIX's server (`sentrix-botd`), so protection works while the customer's
+computer is off. Results go to the customer's private chat with the bot. Full description, security rules and what still has
+to be done by the operator: [HOSTED_BOT.md](HOSTED_BOT.md). Group files are checked on that server and deleted straight away.
 
-* Group Shield works only **while the owner's computer is on** and SENTRIX is running. Files posted while it is off wait at
-  Telegram (about 24 hours) and are scanned when SENTRIX starts again.
-* A group belongs to the bot owner's installation. Different customers' groups are on different computers; the admin console
-  only receives counts.
-* A SENTRIX-operated central bot with server-side scanning would be a different product (hosting, privacy and legal
-  implications: file contents would leave users' computers). It is not built.
+**2. The customer's own bot (advanced).** The customer creates a bot with @BotFather and connects it in the app (Telegram,
+"Use my own bot instead"). That bot is polled by the app on the customer's computer, which also scans. Group Shield then works
+only **while that computer is on** and SENTRIX is running; files posted while it is off wait at Telegram (about 24 hours).
+Results go to the bot owner's private chat, not the group.
+
+In both cases a group belongs to one person: the administrator who linked it. Reports are labelled with the group's name.
 
 ## Setting it up
 
-1. **Owner** (Telegram page): connect a bot, then turn on **Protect Telegram groups**. This is the owner's consent that
+**Shared bot:** press Start in the bot, choose **Protect a group**, press **Choose a group**, pick the group (you must be an
+administrator there). The bot confirms in your private chat. If Telegram hides the group's files from the bot ("has no access to
+messages" in the member list), the bot tells you to make it a group administrator; the operator can also disable privacy mode
+once for all groups (see HOSTED_BOT.md).
+
+**Own bot:**
+
+1. **Owner** (Telegram page, "Groups" tab): connect a bot, then turn on **Protect Telegram groups**. This is the owner's consent that
    groups may be scanned on this computer. It is off by default.
 2. Add the bot to the group.
 3. Make the bot a **group administrator**, *or* in @BotFather send `/setprivacy`, choose the bot, then **Disable**, and add the
    bot to the group again. Otherwise Telegram does not deliver ordinary messages to the bot (see "What it can see").
 4. A **group administrator** sends `/setup on` in the group. Until then the group is registered and nothing is scanned.
+   (With the shared bot, an administrator must have pressed Start in the bot first so a result can be delivered.)
 
 ## Commands
 

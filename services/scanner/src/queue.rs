@@ -139,7 +139,7 @@ pub enum StoreError {
 }
 
 pub struct JobStore {
-    conn: Mutex<Connection>,
+    pub(crate) conn: Mutex<Connection>,
 }
 
 const SCHEMA: &str = r#"
@@ -178,6 +178,19 @@ CREATE TABLE IF NOT EXISTS tg_group_scans(
   outcome TEXT NOT NULL, action TEXT, ts INTEGER NOT NULL, UNIQUE(chat_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS tg_group_scans_chat ON tg_group_scans(chat_id, ts);
+-- Shared (hosted) bot: people who pressed Start, one-time link codes, and desktop apps linked to a person's chat.
+CREATE TABLE IF NOT EXISTS tg_users(
+  user_id INTEGER PRIMARY KEY, first_name TEXT NOT NULL DEFAULT '', started_at INTEGER NOT NULL, blocked INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS link_codes(
+  code TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('group','device')), user_id INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL, used_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS relay_devices(
+  id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, token_hash TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+  created_at INTEGER NOT NULL, last_seen_at INTEGER, revoked_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS relay_devices_user ON relay_devices(user_id);
 "#;
 
 /// Columns added after the first release. Existing databases are upgraded in place.

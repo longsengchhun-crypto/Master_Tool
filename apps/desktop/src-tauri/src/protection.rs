@@ -52,6 +52,9 @@ pub fn build_config(st: &AppState) -> ServiceConfig {
     c.chat_id = if bot_ok { s.telegram.chat_id } else { None };
     c.accept_submissions = bot_ok && s.telegram.accept_submissions;
     c.group_shield = bot_ok && s.telegram.group_shield && s.telegram.groups_allowed;
+    // Linked to the shared SENTRIX bot: reports go through the relay and the app holds no bot token. Groups are then
+    // managed in the bot itself (it runs on SENTRIX's server), not here.
+    c.relay = !bot_ok && s.telegram.bot_allowed && s.telegram.relay_linked && st.relay_vault.exists();
     c
 }
 
@@ -71,6 +74,7 @@ pub fn refresh_bot(st: &AppState) {
 /// (Re)apply settings to the running service. Idempotent.
 pub fn apply(app: &AppHandle, st: &Arc<AppState>) {
     refresh_bot(st);
+    crate::hosted::refresh_courier(st);
     // Organization policy can switch personal-account protection off: sign out and erase the session (off the UI thread).
     if !st.store.settings.lock().unwrap().telegram.account_allowed && (st.account.is_running() || !matches!(st.account.view().link, sentrix_core::account_td::LinkState::Disconnected | sentrix_core::account_td::LinkState::Unconfigured(_))) {
         let s2 = st.clone();
@@ -166,6 +170,8 @@ pub struct TelegramStatus {
     pub notify: NotifyPrefs,
     pub desktop: DesktopStatus,
     pub account: crate::account::AccountOut,
+    /// The shared SENTRIX bot: link state, reachability, and where to find the bot.
+    pub relay: crate::hosted::RelayOut,
     pub groups: GroupsStatus,
     pub rejected_submissions: u64,
     pub recent_notifications: Vec<sentrix_core::queue::OutboxRow>,
@@ -236,6 +242,7 @@ pub fn telegram_status(st: &AppState) -> TelegramStatus {
             threats,
         },
         account: crate::account::account_out(st),
+        relay: crate::hosted::relay_out(st),
         groups: GroupsStatus { shield: s.telegram.group_shield && s.telegram.groups_allowed, allowed: s.telegram.groups_allowed, privacy_blocks: st.service.privacy_mode_blocks(), list: st.service.groups_view() },
         rejected_submissions: health.rejected_submissions,
         recent_notifications: st.jobs.recent_notifications(15).unwrap_or_default(),
@@ -276,6 +283,9 @@ pub async fn tg_detect_chat(token: String) -> Res<Vec<i64>> {
 #[tauri::command]
 pub async fn tg_connect_bot(app: AppHandle, state: Shared<'_>, token: String, chat_id: i64) -> Res<TelegramStatus> {
     require_allowed(&state)?;
+    if state.store.settings.lock().unwrap().telegram.relay_linked {
+        return Err("This computer is linked to the SENTRIX bot. Unlink it first if you want to use your own bot.".into());
+    }
     if chat_id == 0 {
         return Err("Enter your Telegram chat ID (a number).".into());
     }

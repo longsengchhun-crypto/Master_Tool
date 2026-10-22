@@ -44,6 +44,15 @@ if (-not $env:SENTRIX_TG_API_ID -or -not $env:SENTRIX_TG_API_HASH) {
     foreach ($l in Get-Content $dev) { if ($l -match '^\s*(SENTRIX_TG_API_(ID|HASH))=(.+)$') { Set-Item "env:$($Matches[1])" $Matches[3].Trim() } }
   }
 }
+# The shared SENTRIX bot: where its relay is and what the bot is called (public values).
+if (-not $env:SENTRIX_RELAY_URL -or -not $env:SENTRIX_BOT_USERNAME) {
+  $botenv = Join-Path $root '.sentrix-devot.env'
+  if (Test-Path $botenv) {
+    foreach ($l in Get-Content $botenv) { if ($l -match '^\s*(SENTRIX_RELAY_URL|SENTRIX_BOT_USERNAME)=(.+)$') { Set-Item "env:$($Matches[1])" $Matches[2].Trim() } }
+  }
+}
+if ($env:SENTRIX_RELAY_URL -and $env:SENTRIX_BOT_USERNAME) { Write-Host 'SENTRIX bot relay configured: the app can link to the shared bot.' }
+else { Write-Warning 'No relay address or bot username: the app will only offer the advanced "use my own bot" option.' }
 if ($env:SENTRIX_TG_API_ID -and $env:SENTRIX_TG_API_HASH) { Write-Host 'Telegram API credentials found: account protection will be available in this build.' }
 else { Write-Warning 'No Telegram API credentials: this build will show account protection as unavailable.' }
 

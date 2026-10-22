@@ -21,6 +21,7 @@ A Windows desktop file-protection product with a centralized, independently depl
 | Reports to **your own Telegram bot** (token DPAPI-protected, delivery queue with retries); optional files-to-bot scanning | Implemented; tested against a local Bot API **test double**, not live Telegram ([docs/TELEGRAM.md](docs/TELEGRAM.md)) |
 | Telegram Desktop download-folder scanning with source labels | Implemented, tested |
 | **Group Shield**: scans files posted in Telegram groups the owner's bot is in; optional consented deletion of malicious messages | Implemented; tested against a test double and real ClamAV, not live Telegram; runs on the owner's PC ([docs/GROUP_SHIELD.md](docs/GROUP_SHIELD.md)) |
+| **Shared SENTRIX bot** | Customers find the bot, press Start and choose **Protect a group** or **Protect my account**; every result arrives in their own private chat, never in a group. Built and tested against a Telegram test double, **not live and not deployed**: see [docs/HOSTED_BOT.md](docs/HOSTED_BOT.md) |
 | **Telegram account protection** | Implemented on Telegram's official library (TDLib), QR sign-in only, no password ever collected, two-step-password accounts unsupported. **Not yet verified with a real signed-in account**; see [docs/TELEGRAM_ACCOUNT.md](docs/TELEGRAM_ACCOUNT.md) |
 | Execution guard: reversible deny-execute permission on a confirmed-malicious file | Implemented, tested (a guarded file really fails to launch) |
 | Encrypted quarantine, tamper-evident metadata and audit log, confirmed restore | Implemented, tested |

@@ -5,7 +5,7 @@
  *
  *   ?mock=healthy | stopped | unavailable | managed | onboarding      &theme=light|dark
  */
-import type { AppStatus, ScanReport, Settings, QuarantineRecord, AccountStatus, Check, Finding, ProtectionHealth, TelegramStatus, TgAccount, NotifyPrefs } from '../lib/types';
+import type { AppStatus, ScanReport, Settings, QuarantineRecord, AccountStatus, Check, Finding, ProtectionHealth, TelegramStatus, TgAccount, RelayStatus, NotifyPrefs } from '../lib/types';
 
 type Handlers = Record<string, (args: any) => unknown>;
 declare global {
@@ -79,7 +79,7 @@ const QUAR: QuarantineRecord[] = [
 
 const NOTIFY: NotifyPrefs = { malicious: true, suspicious: true, unableToVerify: false, cleanScans: false, quarantined: true, engineProblems: true, protectionStopped: true, accountEvents: true, includeHash: true };
 const settings = (over: Partial<Settings> = {}): Settings => ({ realtimeMonitoring: true, monitoredFolders: ['downloads', 'desktop'], customFolders: [], autoQuarantine: 'off', allowRestoreSuspicious: true, notifications: true, maxFileSizeMb: 512, archiveMaxDepth: 3, telemetryEnabled: false, theme: 'system', onboardingDone: true, executionGuard: false,
-  telegram: { chatId: null, botUsername: null, notify: NOTIFY, acceptSubmissions: false, desktopFolder: null, botAllowed: true, accountAllowed: false, groupShield: false, groupsAllowed: true }, ...over });
+  telegram: { chatId: null, botUsername: null, notify: NOTIFY, acceptSubmissions: false, desktopFolder: null, botAllowed: true, accountAllowed: false, groupShield: false, groupsAllowed: true, relayLinked: false }, ...over });
 
 function status(scn: string): AppStatus {
   const healthy = scn === 'healthy' || scn === 'managed' || scn === 'onboarding';
@@ -159,6 +159,16 @@ function tgAccount(scn: string): TgAccount {
   }
 }
 
+/** Dev preview only. ?relay=linked|none|removed|unreachable|unavailable */
+function relayState(scn: string): RelayStatus {
+  const q = new URLSearchParams(location.search).get('relay') ?? (scn === 'healthy' ? 'linked' : 'none');
+  const base: RelayStatus = { available: q !== 'unavailable', linked: false, botUsername: 'SentrixGuardBot', botLink: 'https://t.me/SentrixGuardBot', userName: null, linkedAt: null, reachable: null, checkedAt: null, error: null, removedRemotely: false };
+  if (q === 'linked' || q === 'unreachable') return { ...base, linked: true, userName: 'Sam', linkedAt: min(60 * 26), reachable: q === 'linked', checkedAt: min(1) };
+  if (q === 'removed') return { ...base, removedRemotely: true };
+  if (q === 'unavailable') return { ...base, botUsername: null, botLink: null };
+  return base;
+}
+
 function telegram(scn: string): TelegramStatus {
   const connected = scn === 'healthy' || scn === 'stopped' || scn === 'managed';
   const bad = scn === 'stopped';
@@ -168,6 +178,7 @@ function telegram(scn: string): TelegramStatus {
     acceptSubmissions: scn === 'healthy', notify: NOTIFY,
     desktop: { detection: { installed: true, evidence: ['C:\Users\Sample\AppData\Roaming\Telegram Desktop'], candidates: [{ path: 'C:\Users\Sample\Downloads\Telegram Desktop', exists: true, fileCount: 18 }] }, folder: connected ? 'C:\Users\Sample\Downloads\Telegram Desktop' : null, exists: true, watching: connected && !bad, error: null, scanned: connected ? 18 : 0, threats: connected ? 1 : 0 },
     account: tgAccount(scn),
+    relay: relayState(scn),
     groups: {
       shield: connected, allowed: true, privacyBlocks: scn === 'stopped',
       list: connected ? [
@@ -215,6 +226,9 @@ export function installMock() {
     tg_set_group_shield: () => telegram(scn),
     tg_group_disable: () => telegram(scn),
     tg_group_leave: () => telegram(scn),
+    tg_relay_link: () => telegram(scn),
+    tg_relay_unlink: () => telegram(scn),
+    tg_relay_test: () => telegram(scn),
     tg_account_status: () => tgAccount(scn),
     tg_account_connect: () => tgAccount(scn),
     tg_account_disconnect: () => tgAccount(scn),

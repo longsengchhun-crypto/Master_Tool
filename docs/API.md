@@ -71,3 +71,16 @@ require a password re-entry within the last 10 minutes (`403 reauth_required` â†
 | `GET /api/updates/:platform/:currentVersion?id=<install id>` | Tauri updater format `{version, notes, pub_date, url, signature}` or `204`. Only published/staged releases with artifact + SHA-256 + signature; staged releases honor the stable cohort `sha256(id:version) mod 100 < rollout%`. |
 | `GET /api/public/releases` | Latest published stable build per platform: version, URL, SHA-256, size, code-signed flag, notes. No internal ids. |
 | `GET /api/health` | `{"status":"ok"}` or 503. |
+
+## Relay (shared bot): `sentrix-botd`
+
+Used by the desktop app to report through the shared bot. Not part of the console API. Run behind HTTPS.
+
+| Call | Auth | Notes |
+|---|---|---|
+| `POST /v1/link` `{code, name}` | none | One-time code from the bot -> `{token, userName}`. Rate limited |
+| `POST /v1/report` `{text}` | `Bearer <token>` | `202 {queued}`. Text reduced to `<b> <i> <code>`. Target is always the token owner. 6/min, 60/h |
+| `GET /v1/status` | Bearer | `{linked, reachable}` |
+| `DELETE /v1/link` | Bearer | Unlinks the computer (`204`) |
+
+See [HOSTED_BOT.md](HOSTED_BOT.md).

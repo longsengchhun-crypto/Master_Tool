@@ -41,6 +41,14 @@ pub struct State {
     pub reply_to: Vec<Option<i64>>,
     /// BotFather privacy mode: when true, getMe reports can_read_all_group_messages = false.
     pub privacy_on: bool,
+    /// People who pressed Start. The bot may write to them; anyone else gets Telegram's 403.
+    pub users: std::collections::HashSet<i64>,
+    /// People who blocked the bot after starting it.
+    pub blocked: std::collections::HashSet<i64>,
+    /// reply_markup of each entry in `sent` (inline buttons), parallel to `sent`.
+    pub markup: Vec<Option<Value>>,
+    /// Callback ids the bot answered.
+    pub answered: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -97,6 +105,53 @@ impl Mock {
 
     pub fn add_text_update(&self, update_id: i64, chat: i64, from: i64, text: &str) {
         self.state.lock().unwrap().updates.push(json!({"update_id": update_id, "message": {"chat": {"id": chat, "type": "private"}, "from": {"id": from}, "text": text}}));
+    }
+
+    /// A person presses Start in a private chat with the bot (shared-bot mode). From now on the bot may write to them.
+    pub fn add_start(&self, update_id: i64, user: i64, first_name: &str) {
+        let mut s = self.state.lock().unwrap();
+        s.users.insert(user);
+        s.updates.push(json!({"update_id": update_id, "message": {"message_id": update_id, "chat": {"id": user, "type": "private"}, "from": {"id": user, "first_name": first_name}, "text": "/start"}}));
+    }
+
+    /// Any text a person sends the bot privately (they must have pressed Start for the bot to answer).
+    pub fn add_private_text(&self, update_id: i64, user: i64, text: &str) {
+        self.state.lock().unwrap().updates.push(json!({"update_id": update_id, "message": {"message_id": update_id, "chat": {"id": user, "type": "private"}, "from": {"id": user, "first_name": "Sam"}, "text": text}}));
+    }
+
+    /// A person taps an inline button under one of the bot's messages.
+    pub fn add_callback(&self, update_id: i64, user: i64, data: &str) {
+        self.state.lock().unwrap().updates.push(json!({"update_id": update_id, "callback_query": {"id": format!("cb{update_id}"), "from": {"id": user, "first_name": "Sam"}, "message": {"message_id": 1, "chat": {"id": user, "type": "private"}}, "data": data}}));
+    }
+
+    /// The person blocks the bot (Telegram sends my_chat_member with status kicked).
+    pub fn add_user_blocks_bot(&self, update_id: i64, user: i64) {
+        let mut s = self.state.lock().unwrap();
+        s.blocked.insert(user);
+        s.updates.push(json!({"update_id": update_id, "my_chat_member": {"chat": {"id": user, "type": "private"}, "from": {"id": user}, "old_chat_member": {"status": "member"}, "new_chat_member": {"status": "kicked"}}}));
+    }
+
+    /// Group has the bot as a plain member; `admins` are administrators. A group the person picked via the startgroup link.
+    pub fn add_startgroup(&self, update_id: i64, chat: i64, message_id: i64, from: i64, code: &str) {
+        self.add_group_text(update_id, chat, message_id, from, &format!("/start@sentrix_test_bot {code}"));
+    }
+
+    /// Text of the URL buttons on the most recent message sent to `chat`.
+    pub fn last_urls(&self, chat: i64) -> Vec<String> {
+        let s = self.state.lock().unwrap();
+        let idx = s.sent.iter().rposition(|(c, _)| *c == chat);
+        let Some(i) = idx else { return vec![] };
+        let Some(m) = s.markup.get(i).and_then(|m| m.clone()) else { return vec![] };
+        m["inline_keyboard"].as_array().map(|rows| rows.iter().flat_map(|r| r.as_array().cloned().unwrap_or_default()).filter_map(|b| b["url"].as_str().map(String::from)).collect()).unwrap_or_default()
+    }
+
+    /// Labels of the callback buttons on the most recent message sent to `chat`.
+    pub fn last_buttons(&self, chat: i64) -> Vec<(String, String)> {
+        let s = self.state.lock().unwrap();
+        let idx = s.sent.iter().rposition(|(c, _)| *c == chat);
+        let Some(i) = idx else { return vec![] };
+        let Some(m) = s.markup.get(i).and_then(|m| m.clone()) else { return vec![] };
+        m["inline_keyboard"].as_array().map(|rows| rows.iter().flat_map(|r| r.as_array().cloned().unwrap_or_default()).filter_map(|b| Some((b["text"].as_str()?.to_string(), b["callback_data"].as_str()?.to_string()))).collect()).unwrap_or_default()
     }
 
     pub fn add_group(&self, chat: i64, admins: &[i64], bot_admin: bool, bot_can_delete: bool) {
@@ -272,13 +327,26 @@ fn handle(mut conn: TcpStream, state: Arc<Mutex<State>>) {
                 None => {}
             }
             let chat = body["chat_id"].as_i64().unwrap_or(0);
-            if chat != CHAT && !state.lock().unwrap().groups.contains_key(&chat) {
-                return json_resp(&mut conn, 400, json!({"ok": false, "error_code": 400, "description": "Bad Request: chat not found"}));
+            {
+                let s = state.lock().unwrap();
+                if chat > 0 && chat != CHAT {
+                    // A person's private chat: Telegram refuses a person who blocked the bot (403) and knows nobody who never
+                    // contacted it (400), exactly as the original double did.
+                    if s.blocked.contains(&chat) {
+                        return json_resp(&mut conn, 403, json!({"ok": false, "error_code": 403, "description": "Forbidden: bot was blocked by the user"}));
+                    }
+                    if !s.users.contains(&chat) {
+                        return json_resp(&mut conn, 400, json!({"ok": false, "error_code": 400, "description": "Bad Request: chat not found"}));
+                    }
+                } else if chat != CHAT && !s.groups.contains_key(&chat) {
+                    return json_resp(&mut conn, 400, json!({"ok": false, "error_code": 400, "description": "Bad Request: chat not found"}));
+                }
             }
             let text = body["text"].as_str().unwrap_or("").to_string();
             let reply = body["reply_parameters"]["message_id"].as_i64();
             let mut s = state.lock().unwrap();
             s.reply_to.push(reply);
+            s.markup.push(body.get("reply_markup").cloned());
             s.sent.push((chat, text));
             let id = s.sent.len();
             json_resp(&mut conn, 200, json!({"ok": true, "result": {"message_id": id}}));
@@ -292,6 +360,11 @@ fn handle(mut conn: TcpStream, state: Arc<Mutex<State>>) {
                 std::thread::sleep(Duration::from_millis(150));
             }
             json_resp(&mut conn, 200, json!({"ok": true, "result": r}));
+        }
+        "answerCallbackQuery" => {
+            let id = body["callback_query_id"].as_str().unwrap_or("").to_string();
+            state.lock().unwrap().answered.push(id);
+            json_resp(&mut conn, 200, json!({"ok": true, "result": true}));
         }
         "getFile" => {
             let id = body["file_id"].as_str().unwrap_or("");
