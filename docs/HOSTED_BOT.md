@@ -16,10 +16,19 @@ posted in a group.
 2. **Protect a group.** The customer makes a new group called **Scan History** and adds the bot to it (they can add other people
    too: everyone in it can read the results). The bot recognises the name and links the group to the person who added it, after
    Telegram confirms that person is a member. Then the customer presses **Choose a group** in the bot, which opens Telegram's
-   own group picker; Telegram adds the bot to the group to protect. The customer must be an administrator of that group. From
-   then on, documents posted in it are checked and **every result goes to that customer's Scan History group, labelled with the
-   protected group's name**. The protected group itself never sees a scan, an alert or a notice. Until a Scan History group
-   exists, results come to the customer's private chat with the bot, with a reminder to make one.
+   own group picker; Telegram adds the bot to the group to protect. The customer only needs to be a **member** of that group,
+   not an administrator. From then on, documents posted in it are checked and **every result goes to a Scan History group of
+   that customer, labelled with the protected group's name**. The protected group itself never sees a scan, an alert or a notice.
+   Until a Scan History group exists, results come to the customer's private chat with the bot, with a reminder to make one.
+   * **As many protected groups as they like**, and **as many Scan History groups as they like** (up to 25 at once, only to stop
+     one account making the bot post into thousands of rooms). Each Scan History group is numbered ("Scan History #2") in
+     its welcome message, because they all have the same name.
+   * **Which Scan History group each protected group reports to is the customer's choice.** With one Scan History group there
+     is nothing to choose. With two or more, the bot asks right after a group is protected, with one button per numbered room
+     plus "All of them", and *My protection* has a "Change where ... reports" button per group. Many protected groups can report
+     to the same room, or each can have its own. Until chosen, a group reports to all of them, so nothing is lost.
+   * A member can protect a group nobody protects yet. Taking over a group someone else already protects needs an
+     administrator, so a member cannot quietly redirect another person's reports.
 3. **Protect my account.** Account protection runs in the SENTRIX desktop app on the customer's own computer, because that is
    where their Telegram login must stay. The bot gives a one-time code (`ABCD-EFGH`, valid 10 minutes, works once). The
    customer types it into the app (Telegram → Link). The app then sends the *text of each result* through the bot's relay to
@@ -35,7 +44,8 @@ A bot cannot add itself to a group; Telegram does not allow it. What SENTRIX use
 
 * looks the code up (it is one-time, expires after 30 minutes, and was made for that exact person);
 * checks that the sender is that person (a link made for someone else is refused);
-* asks **Telegram** (`getChatMember`) whether that person is an administrator of the group (the message text is never trusted);
+* asks **Telegram** (`getChatMember`) whether that person is in the group (the message text is never trusted); a group someone
+  else already protects can only be taken over by an administrator;
 * checks the person has pressed Start, so the result can actually be delivered;
 * only then switches protection on, recording the person as the group's owner.
 
@@ -48,7 +58,7 @@ A bot cannot add itself to a group; Telegram does not allow it. What SENTRIX use
 | Group file scan result | The Scan History group of the person who protects the group (their private chat with the bot until they make one) | Never the protected group. Includes the group's name, file name, verdict, detection name. **Everyone in Scan History can read it** |
 | `/report` in a group (administrators) | The same place | Counts only |
 | Clean results | Also reported, in the same place | A group protected through the shared bot reports every result, including "no known threat", because the reports go to a separate room. An administrator can switch clean reports off with `/setup clean off`; that choice is kept |
-| Scan History group | Linked by adding the bot to a group named exactly "Scan History" (any capitalisation), or `/link` in it | The adder must be a member (Telegram is asked). Renaming it, or removing the bot, unlinks it. One per person; two people never share routing |
+| Scan History group | Linked by adding the bot to a group named exactly "Scan History" (any capitalisation), or `/link` in it | The adder must be a member (Telegram is asked). Renaming it, or removing the bot, unlinks it. A person can have many (numbered #1, #2, ...); two people never share routing |
 | App (account protection) result | The customer's private chat, via the relay | Text only: file name, verdict, time. Files stay on the customer's computer |
 | Group files | The bot's server, **in memory and a temporary folder, deleted right after the check** | Up to 20 MB, documents only. This is the one place customer files reach SENTRIX's server; the bot says so |
 

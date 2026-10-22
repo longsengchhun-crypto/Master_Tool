@@ -223,13 +223,24 @@ impl Inner {
 
     /// Where a group's scan reports go: the private chat of the person who protects it (shared bot), or the bot owner's
     /// private chat (own bot). Never the group itself, so other members do not see who posted what.
-    fn report_dest(&self, g: &Group) -> Option<i64> {
+    fn report_dests(&self, g: &Group) -> Vec<i64> {
         let cfg = self.cfg.read().unwrap();
         if cfg.hosted.is_some() {
-            self.person_dest(g.enabled_by?)
+            let Some(owner) = g.enabled_by else { return vec![] };
+            let rooms = self.person_dests(owner);
+            // The owner may have chosen one Scan History group for this group. If that one is gone, use all of them.
+            match self.store.report_choice_get(g.chat_id) {
+                Some(h) if rooms.contains(&h) => vec![h],
+                _ => rooms,
+            }
         } else {
-            cfg.chat_id
+            cfg.chat_id.into_iter().collect()
         }
+    }
+
+    /// The first destination: where a "Checking..." message is placed and later replaced.
+    fn report_dest(&self, g: &Group) -> Option<i64> {
+        self.report_dests(g).first().copied()
     }
 
     fn report_body(&self, g: &Group, dest: i64, body: String) -> String {
@@ -269,28 +280,45 @@ impl Inner {
     }
 
     /// Where this person's reports go: their Scan History group if they made one, otherwise their private chat with the bot.
-    pub(crate) fn person_dest(&self, user: i64) -> Option<i64> {
-        self.store.history_get(user).map(|h| h.0).or_else(|| Some(user).filter(|u| self.store.user_reachable(*u)))
+    /// Every place this person's reports go: all of their Scan History groups (newest first), or their private chat when they
+    /// have none and have pressed Start.
+    pub(crate) fn person_dests(&self, user: i64) -> Vec<i64> {
+        let all: Vec<i64> = self.store.history_all(user).into_iter().map(|h| h.0).collect();
+        if !all.is_empty() {
+            all
+        } else if self.store.user_reachable(user) {
+            vec![user]
+        } else {
+            vec![]
+        }
     }
 
     fn post_report(&self, g: &Group, key: &str, body: String, urgent: bool) -> bool {
-        let Some(dest) = self.report_dest(g) else {
+        let dests = self.report_dests(g);
+        if dests.is_empty() {
             self.event("group_report_undeliverable", "warning", "A scan report could not be sent because the person who protects the group cannot be reached. They need to open the bot and press Start.");
             return false;
-        };
-        let text = self.report_body(g, dest, body);
-        // A "Checking..." message for this very file is replaced in place; only if that fails is a new message sent.
-        if let Some(mid) = key.strip_prefix('m').and_then(|k| k.parse::<i64>().ok()) {
-            if let Some((pdest, pid, _)) = self.groups.placeholders.lock().unwrap().remove(&(g.chat_id, mid)) {
-                let bot = self.bot.read().unwrap().clone();
-                if let Some(bot) = bot {
-                    if bot.edit_message_text(pdest, pid, &text).is_ok() {
-                        return true;
+        }
+        // A "Checking..." message for this very file is replaced in place; only if that fails is a new message sent there.
+        let placeholder = key.strip_prefix('m').and_then(|k| k.parse::<i64>().ok()).and_then(|mid| self.groups.placeholders.lock().unwrap().remove(&(g.chat_id, mid)));
+        let mut any = false;
+        for (i, dest) in dests.iter().copied().enumerate() {
+            let text = self.report_body(g, dest, body.clone());
+            if let Some((pdest, pid, _)) = &placeholder {
+                if *pdest == dest {
+                    if let Some(bot) = self.bot.read().unwrap().clone() {
+                        if bot.edit_message_text(*pdest, *pid, &text).is_ok() {
+                            any = true;
+                            continue;
+                        }
                     }
                 }
             }
+            // The first destination keeps the original key; the others get their own, so none is mistaken for a duplicate.
+            let k = if i == 0 { format!("r:{}:{key}", g.chat_id) } else { format!("r:{}:{key}:{dest}", g.chat_id) };
+            any |= self.say(dest, None, &k, "group_scan", text, urgent);
         }
-        self.say(dest, None, &format!("r:{}:{key}", g.chat_id), "group_scan", text, urgent)
+        any
     }
 
     /// Everything that happens inside a group called "Scan History" (shared-bot mode).
@@ -344,7 +372,17 @@ impl Inner {
                 if self.store.history_set(user, chat, title, now).is_ok() {
                     self.event("history_linked", "info", "A Scan History group was linked to a person. Their scan reports now go there.");
                     let _ = self.store.group_forget(chat); // it is a report room, not a protected group
-                    let _ = self.say(chat, None, &format!("linked:{chat}:{user}:{update_id}"), "group_notice", format!("<b>SENTRIX {HISTORY_GROUP_NAME}</b>\nReports for the groups this person protects will appear here. Everyone in this group can read them, so add only people who should."), false);
+                    let rooms = self.store.history_rooms(user);
+                    let num = rooms.iter().find(|r| r.chat_id == chat).map(|r| r.num).unwrap_or(1);
+                    // More than one room: tell the person, privately, that they can now pick which group reports where.
+                    if rooms.len() > 1 {
+                        let has_groups = self.store.groups_list().unwrap_or_default().iter().any(|g| g.enabled_by == Some(user) && g.left_at.is_none());
+                        if has_groups && self.store.user_reachable(user) {
+                            let t = format!("<b>Scan History #{num} is linked.</b> You now have {} Scan History groups. Until you choose, every protected group reports to all of them. To choose where each protected group reports, open <b>My protection</b>.", rooms.len());
+                            let _ = self.store.enqueue_notification_to(&format!("histmulti:{chat}:{update_id}"), "hosted_notice", &t, now, Some(user), None);
+                        }
+                    }
+                    let _ = self.say(chat, None, &format!("linked:{chat}:{user}:{update_id}"), "group_notice", format!("<b>SENTRIX {HISTORY_GROUP_NAME} #{num}</b>\nReports for the groups this person protects will appear here, whenever a file is checked. Everyone in this group can read them, so add only people who should. A person can have as many Scan History groups as they like; every one gets every report."), false);
                 }
             }
             Ok(false) => {
@@ -448,12 +486,15 @@ impl Inner {
             "/report" => match self.require_admin(bot, u) {
                 Ok(uid) => {
                     // A summary is a report: it goes to the administrator's private chat, never into the group.
-                    let dest = if hosted { self.person_dest(uid) } else { self.cfg.read().unwrap().chat_id };
-                    match dest {
-                        Some(d) => {
+                    let dests: Vec<i64> = if hosted { self.person_dests(uid) } else { self.cfg.read().unwrap().chat_id.into_iter().collect() };
+                    match dests.first() {
+                        Some(_) => {
                             let t = format!("<b>Group:</b> {}\n{}", esc(&g.title), self.report_text(g));
-                            let _ = self.say(d, None, &format!("rpt:{}:{}", g.chat_id, u.update_id), "group_scan", t, false);
-                            reply("report", if hosted { "The summary was sent to your Scan History group (or to you privately if you have none).".into() } else { "The summary was sent to you privately.".into() });
+                            for (i, d) in dests.iter().enumerate() {
+                                let k = if i == 0 { format!("rpt:{}:{}", g.chat_id, u.update_id) } else { format!("rpt:{}:{}:{d}", g.chat_id, u.update_id) };
+                                let _ = self.say(*d, None, &k, "group_scan", t.clone(), false);
+                            }
+                            reply("report", if hosted { "The summary was sent to your Scan History group(s), or to you privately if you have none.".into() } else { "The summary was sent to you privately.".into() });
                         }
                         None => reply("report", "Open the SENTRIX bot privately and press Start first. Reports are sent there, not here.".into()),
                     }

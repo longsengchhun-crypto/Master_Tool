@@ -102,6 +102,7 @@ export interface Settings {
   maxFileSizeMb: number;
   archiveMaxDepth: number;
   telemetryEnabled: boolean;
+  autoUpdate: boolean;
   theme: 'system' | 'light' | 'dark';
   onboardingDone: boolean;
   executionGuard: boolean;

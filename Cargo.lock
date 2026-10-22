@@ -3841,7 +3841,7 @@ dependencies = [
 
 [[package]]
 name = "sentrix-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aho-corasick",
  "base64 0.22.1",
@@ -3853,6 +3853,8 @@ dependencies = [
  "hmac",
  "libloading 0.8.9",
  "memchr",
+ "minisign",
+ "minisign-verify 0.2.5",
  "notify",
  "qrcode",
  "rand 0.8.8",
@@ -3871,7 +3873,7 @@ dependencies = [
 
 [[package]]
 name = "sentrix-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",

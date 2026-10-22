@@ -1,7 +1,7 @@
 [package]
 publish = false
 name = "sentrix-core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "SENTRIX security engine: file identification, layered detection, verdicts, quarantine"
 license = "UNLICENSED"
@@ -44,6 +44,8 @@ base64 = "0.22"
 libloading = { version = "0.8", default-features = false }
 qrcode = { version = "0.14", default-features = false }
 tiny_http = "0.12"
+# Checks the signature on a downloaded bot update (the same scheme and key as the desktop app's updates).
+minisign-verify = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
@@ -58,3 +60,4 @@ windows-sys = { version = "0.59", features = [
 
 [dev-dependencies]
 tempfile = "3"
+minisign = "0.7"

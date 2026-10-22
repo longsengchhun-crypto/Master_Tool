@@ -675,17 +675,30 @@ pub struct UpdateInfo {
     pub message: String,
 }
 
+/// Where new versions are announced when the device is not managed by a console: the release feed published with every
+/// release (a JSON file next to the installer). The signature, not the address, is what makes an update trustworthy.
+const PUBLIC_FEED: &str = "https://github.com/longsengchhun-crypto/Master_Tool/releases/latest/download/latest.json";
+
 fn update_base(st: &AppState) -> Option<String> {
     option_env!("SENTRIX_UPDATE_BASE_URL").map(String::from).or_else(|| st.portal.status().portal_url)
 }
 
+/// A managed device asks its console (which can stage a rollout); everything else reads the public release feed.
+fn feed_url(console: Option<String>, version: &str, install_id: &str) -> Result<String, String> {
+    match console {
+        Some(base) => {
+            let base = crate::portal::validate_portal_url(&base)?;
+            Ok(format!("{base}/api/updates/windows-x64/{version}?id={install_id}"))
+        }
+        None => Ok(option_env!("SENTRIX_UPDATE_FEED_URL").unwrap_or(PUBLIC_FEED).to_string()),
+    }
+}
+
 /// The updater verifies the release's minisign signature against the public key compiled into this app before it
 /// installs anything. The server (or a CDN, or a network attacker) cannot make it accept an unsigned or re-signed build.
-fn updater_for(app: &AppHandle, st: &AppState) -> Res<tauri_plugin_updater::Updater> {
+pub(crate) fn updater_for(app: &AppHandle, st: &AppState) -> Res<tauri_plugin_updater::Updater> {
     use tauri_plugin_updater::UpdaterExt;
-    let base = update_base(st).ok_or("No update server is configured in this build.")?;
-    let base = crate::portal::validate_portal_url(&base)?;
-    let url = format!("{base}/api/updates/windows-x64/{}?id={}", app.package_info().version, st.store.install_id());
+    let url = feed_url(update_base(st), &app.package_info().version.to_string(), &st.store.install_id())?;
     let url: tauri::Url = url.parse().map_err(|_| "The update address is not valid.".to_string())?;
     app.updater_builder().endpoints(vec![url]).map_err(|e| e.to_string())?.build().map_err(|e| e.to_string())
 }
@@ -773,5 +786,23 @@ pub fn show_main(app: &AppHandle) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
+    }
+}
+
+#[cfg(test)]
+mod feed_tests {
+    use super::*;
+
+    #[test]
+    fn a_device_without_a_console_reads_the_public_release_feed() {
+        let url = feed_url(None, "0.2.0", "abc").unwrap();
+        assert!(url.starts_with("https://") && url.ends_with("/latest.json"), "{url}");
+    }
+
+    #[test]
+    fn a_managed_device_asks_its_console_which_can_stage_a_rollout() {
+        let url = feed_url(Some("https://console.example.com".into()), "0.2.0", "abc").unwrap();
+        assert_eq!(url, "https://console.example.com/api/updates/windows-x64/0.2.0?id=abc");
+        assert!(feed_url(Some("http://console.example.com".into()), "0.2.0", "abc").is_err(), "a console must be https");
     }
 }

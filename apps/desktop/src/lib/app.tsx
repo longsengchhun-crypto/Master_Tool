@@ -151,6 +151,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }),
       listen('engine-state-changed', () => void refresh()),
       listen('protection-update', () => void refresh()),
+      listen<string>('update-installing', (e) => toast('info', `Installing SENTRIX ${e.payload}. The app restarts in a moment.`)),
       listen<string>('navigate', (e) => setPage(e.payload as Page)),
     ];
     return () => {

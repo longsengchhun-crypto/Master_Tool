@@ -78,7 +78,7 @@ const QUAR: QuarantineRecord[] = [
 ];
 
 const NOTIFY: NotifyPrefs = { malicious: true, suspicious: true, unableToVerify: false, cleanScans: false, quarantined: true, engineProblems: true, protectionStopped: true, accountEvents: true, includeHash: true };
-const settings = (over: Partial<Settings> = {}): Settings => ({ realtimeMonitoring: true, monitoredFolders: ['downloads', 'desktop'], customFolders: [], autoQuarantine: 'off', allowRestoreSuspicious: true, notifications: true, maxFileSizeMb: 512, archiveMaxDepth: 3, telemetryEnabled: false, theme: 'system', onboardingDone: true, executionGuard: false,
+const settings = (over: Partial<Settings> = {}): Settings => ({ realtimeMonitoring: true, monitoredFolders: ['downloads', 'desktop'], customFolders: [], autoQuarantine: 'off', allowRestoreSuspicious: true, notifications: true, maxFileSizeMb: 512, archiveMaxDepth: 3, telemetryEnabled: false, autoUpdate: true, theme: 'system', onboardingDone: true, executionGuard: false,
   telegram: { chatId: null, botUsername: null, notify: NOTIFY, acceptSubmissions: false, desktopFolder: null, botAllowed: true, accountAllowed: false, groupShield: false, groupsAllowed: true, relayLinked: false }, ...over });
 
 function status(scn: string): AppStatus {

@@ -7,6 +7,17 @@ use crate::queue::{JobStore, StoreError};
 use rusqlite::{params, OptionalExtension};
 use sha2::{Digest, Sha256};
 
+/// Scan History groups one person can have at once. Far more than anyone needs; it only stops one account from making the
+/// bot post into thousands of rooms.
+pub const MAX_HISTORY_PER_PERSON: i64 = 25;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryRoom {
+    pub chat_id: i64,
+    pub title: String,
+    pub num: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TgUser {
     pub user_id: i64,
@@ -148,19 +159,56 @@ impl JobStore {
         self.conn.lock().unwrap().execute("UPDATE relay_devices SET revoked_at=?3 WHERE id=?1 AND user_id=?2 AND revoked_at IS NULL", params![id, user_id, now]).map(|n| n > 0).unwrap_or(false)
     }
 
-    /// This person's reports now go to `chat`. Their private chat is the fallback when they have none.
+    /// This person's reports also go to `chat`. A person can have many Scan History groups (every one gets every report);
+    /// their private chat is the fallback when they have none. More than `MAX_HISTORY_PER_PERSON` replaces the oldest, so
+    /// one account cannot make the bot post into thousands of rooms.
     pub fn history_set(&self, user_id: i64, chat_id: i64, title: &str, now: i64) -> Result<(), StoreError> {
         let title: String = title.chars().filter(|c| !crate::telegram::is_deceptive(*c)).take(60).collect();
-        self.conn.lock().unwrap().execute(
-            "INSERT INTO user_history(user_id, chat_id, title, linked_at) VALUES (?1,?2,?3,?4)
-             ON CONFLICT(user_id) DO UPDATE SET chat_id=?2, title=?3, linked_at=?4",
+        let c = self.conn.lock().unwrap();
+        c.execute(
+            "INSERT INTO user_history(user_id, chat_id, title, linked_at, num)
+             VALUES (?1,?2,?3,?4,(SELECT COALESCE(MAX(num),0)+1 FROM user_history WHERE user_id=?1))
+             ON CONFLICT(user_id, chat_id) DO UPDATE SET title=?3, linked_at=?4",
             params![user_id, chat_id, title, now],
+        )?;
+        c.execute(
+            "DELETE FROM user_history WHERE user_id=?1 AND chat_id NOT IN
+               (SELECT chat_id FROM user_history WHERE user_id=?1 ORDER BY linked_at DESC, chat_id LIMIT ?2)",
+            params![user_id, MAX_HISTORY_PER_PERSON],
         )?;
         Ok(())
     }
 
+    /// Every Scan History group of this person with its number ("Scan History #2"), oldest first.
+    pub fn history_rooms(&self, user_id: i64) -> Vec<HistoryRoom> {
+        let c = self.conn.lock().unwrap();
+        let Ok(mut st) = c.prepare("SELECT chat_id, title, num FROM user_history WHERE user_id=?1 ORDER BY num, chat_id") else { return vec![] };
+        st.query_map([user_id], |r| Ok(HistoryRoom { chat_id: r.get(0)?, title: r.get(1)?, num: r.get(2)? })).map(|rows| rows.filter_map(Result::ok).collect()).unwrap_or_default()
+    }
+
+    /// Where a protected group's reports go: one chosen Scan History group, or `None` for all of the owner's.
+    pub fn report_choice_get(&self, group_chat: i64) -> Option<i64> {
+        self.conn.lock().unwrap().query_row("SELECT history_chat_id FROM group_report_to WHERE group_chat_id=?1", [group_chat], |r| r.get(0)).optional().ok().flatten()
+    }
+
+    pub fn report_choice_set(&self, group_chat: i64, history_chat: Option<i64>) {
+        let c = self.conn.lock().unwrap();
+        let _ = match history_chat {
+            Some(h) => c.execute("INSERT INTO group_report_to(group_chat_id, history_chat_id) VALUES (?1,?2) ON CONFLICT(group_chat_id) DO UPDATE SET history_chat_id=?2", params![group_chat, h]),
+            None => c.execute("DELETE FROM group_report_to WHERE group_chat_id=?1", [group_chat]),
+        };
+    }
+
+    /// The most recently linked Scan History group.
     pub fn history_get(&self, user_id: i64) -> Option<(i64, String)> {
-        self.conn.lock().unwrap().query_row("SELECT chat_id, title FROM user_history WHERE user_id=?1", [user_id], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok().flatten()
+        self.history_all(user_id).into_iter().next()
+    }
+
+    /// Every Scan History group of this person, newest first.
+    pub fn history_all(&self, user_id: i64) -> Vec<(i64, String)> {
+        let c = self.conn.lock().unwrap();
+        let Ok(mut st) = c.prepare("SELECT chat_id, title FROM user_history WHERE user_id=?1 ORDER BY linked_at DESC, chat_id") else { return vec![] };
+        st.query_map([user_id], |r| Ok((r.get(0)?, r.get(1)?))).map(|rows| rows.filter_map(Result::ok).collect()).unwrap_or_default()
     }
 
     /// Is this chat somebody's Scan History group?
@@ -231,9 +279,31 @@ mod tests {
         assert_eq!(s.history_get(8).unwrap().0, -200, "another person's is separate");
         assert!(s.history_chat_known(-100) && !s.history_chat_known(-300));
         s.history_set(7, -150, "Scan History", 2).unwrap();
-        assert_eq!(s.history_get(7).unwrap().0, -150, "a person has one, the newest");
+        assert_eq!(s.history_get(7).unwrap().0, -150, "the newest comes first");
+        assert_eq!(s.history_all(7).iter().map(|h| h.0).collect::<Vec<_>>(), vec![-150, -100], "a person can have many, and keeps the older one");
         assert_eq!(s.history_clear_chat(-200), 1);
         assert!(s.history_get(8).is_none() && s.history_get(7).is_some());
+        // The cap replaces the oldest instead of growing without limit.
+        for i in 0..(MAX_HISTORY_PER_PERSON + 5) {
+            s.history_set(9, -1000 - i, "Scan History", 10 + i).unwrap();
+        }
+        let all = s.history_all(9);
+        assert_eq!(all.len() as i64, MAX_HISTORY_PER_PERSON);
+        assert_eq!(all[0].0, -1000 - (MAX_HISTORY_PER_PERSON + 4), "the newest is kept");
+        // Numbers are stable and only ever count up for a person.
+        s.history_set(11, -1, "Scan History", 1).unwrap();
+        s.history_set(11, -2, "Scan History", 2).unwrap();
+        s.history_set(11, -1, "Scan History", 3).unwrap(); // linked again: same number
+        assert_eq!(s.history_rooms(11).iter().map(|h| (h.chat_id, h.num)).collect::<Vec<_>>(), vec![(-1, 1), (-2, 2)]);
+        s.history_clear_chat(-1);
+        s.history_set(11, -3, "Scan History", 4).unwrap();
+        assert_eq!(s.history_rooms(11).iter().map(|h| (h.chat_id, h.num)).collect::<Vec<_>>(), vec![(-2, 2), (-3, 3)]);
+        // A per-group choice can be set and cleared.
+        assert_eq!(s.report_choice_get(-500), None);
+        s.report_choice_set(-500, Some(-2));
+        assert_eq!(s.report_choice_get(-500), Some(-2));
+        s.report_choice_set(-500, None);
+        assert_eq!(s.report_choice_get(-500), None);
     }
 
     #[test]

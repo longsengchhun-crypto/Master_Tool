@@ -37,6 +37,8 @@ pub struct Settings {
     pub onboarding_done: bool,
     /// Block execution (deny-execute ACL) of files confirmed malicious that were not quarantined. Reversible.
     pub execution_guard: bool,
+    /// Download and install new versions by itself (signature-checked), when nothing is being scanned. On by default.
+    pub auto_update: bool,
     pub telegram: TelegramSettings,
 }
 
@@ -93,6 +95,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             execution_guard: true,
+            auto_update: true,
             telegram: TelegramSettings::default(),
             realtime_monitoring: false, // enabled only after the user completes onboarding and consents
             monitored_folders: vec!["downloads".into()],
@@ -433,6 +436,7 @@ mod tests {
         assert!(!s.realtime_monitoring, "real-time must be opt-in");
         assert_eq!(s.auto_quarantine, "off", "automatic quarantine must be opt-in");
         assert!(!s.telemetry_enabled);
+        assert!(s.auto_update, "updates install by themselves unless the person turns that off");
     }
 
     #[test]

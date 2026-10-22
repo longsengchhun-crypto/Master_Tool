@@ -193,7 +193,13 @@ CREATE TABLE IF NOT EXISTS relay_devices(
 CREATE INDEX IF NOT EXISTS relay_devices_user ON relay_devices(user_id);
 -- The group a person made, named "Scan History", where the bot posts the reports of the groups that person protects.
 CREATE TABLE IF NOT EXISTS user_history(
-  user_id INTEGER PRIMARY KEY, chat_id INTEGER NOT NULL, title TEXT NOT NULL DEFAULT '', linked_at INTEGER NOT NULL
+  user_id INTEGER NOT NULL, chat_id INTEGER NOT NULL, title TEXT NOT NULL DEFAULT '', linked_at INTEGER NOT NULL,
+  num INTEGER NOT NULL DEFAULT 0, -- "Scan History #num": every room has the same name, so each gets a number the person can tell apart
+  PRIMARY KEY (user_id, chat_id)
+);
+-- Which Scan History group a protected group reports to. No row: all of the owner's Scan History groups.
+CREATE TABLE IF NOT EXISTS group_report_to(
+  group_chat_id INTEGER PRIMARY KEY, history_chat_id INTEGER NOT NULL
 );
 "#;
 
@@ -209,6 +215,26 @@ fn migrate(c: &Connection) -> Result<(), StoreError> {
     }
     if !has("outbox", "reply_to")? {
         c.execute("ALTER TABLE outbox ADD COLUMN reply_to INTEGER", [])?;
+    }
+    // The first release allowed one Scan History group per person (user_id was the key). Rebuild the table so a person can
+    // have many; the existing rows are kept.
+    let one_per_person: bool = c
+        .prepare("PRAGMA table_info(user_history)")?
+        .query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, i64>(5)?)))?
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .any(|(name, pk)| name == "chat_id" && *pk == 0);
+    if one_per_person {
+        c.execute_batch(
+            "BEGIN;
+             ALTER TABLE user_history RENAME TO user_history_old;
+             CREATE TABLE user_history(user_id INTEGER NOT NULL, chat_id INTEGER NOT NULL, title TEXT NOT NULL DEFAULT '', linked_at INTEGER NOT NULL, num INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, chat_id));
+             INSERT OR IGNORE INTO user_history SELECT user_id, chat_id, title, linked_at, 1 FROM user_history_old;
+             DROP TABLE user_history_old;
+             COMMIT;",
+        )?;
+    } else if !has("user_history", "num")? {
+        c.execute("ALTER TABLE user_history ADD COLUMN num INTEGER NOT NULL DEFAULT 0", [])?;
     }
     Ok(())
 }

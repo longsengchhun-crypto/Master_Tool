@@ -86,12 +86,15 @@ export function Settings() {
           <div>
             <h2 className="text-sm font-semibold text-ink">Updates</h2>
             <p className="mt-0.5 text-sm text-muted">
-              {upd ? (upd.available ? `Version ${upd.version} is available.` : `${upd.message}${upd.configured ? ` (version ${upd.current})` : ''}`) : `Version ${status.version}. Updates are signed and verified before they install.`}
+              {upd ? (upd.available ? `Version ${upd.version} is available.` : `${upd.message}${upd.configured ? ` (version ${upd.current})` : ''}`) : `Version ${status.version}. ${s.autoUpdate ? 'New versions install by themselves.' : 'Automatic updates are off.'} Every update is signed and verified before it installs.`}
             </p>
           </div>
           {upd?.available ? <Button variant="primary" onClick={() => setConfirmInstall(true)}>Install {upd.version}</Button> : <Button busy={updBusy === 'check'} onClick={checkUpdate}>Check for updates</Button>}
         </div>
         {upd?.available && upd.notes && <p className="mt-3 whitespace-pre-line rounded-lg bg-surface2 p-3 text-sm text-muted">{upd.notes}</p>}
+        <div className="mt-3 border-t border-line pt-1">
+          <Toggle checked={s.autoUpdate} onChange={(v) => save({ autoUpdate: v })} label="Keep SENTRIX up to date automatically" description="Installs new versions, new scanning rules and fixes by itself when you are not scanning, then restarts. Protection stays on after the restart." />
+        </div>
       </Card>
 
       <Card className="px-5 py-4">

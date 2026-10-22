@@ -1,4 +1,5 @@
 mod account;
+mod autoupdate;
 mod commands;
 mod hosted;
 pub mod portal;
@@ -72,6 +73,7 @@ pub fn run() {
 
             build_tray(app)?;
             sync::spawn_loop(handle.clone(), st.clone());
+            autoupdate::spawn_loop(handle.clone(), st.clone());
 
             // Start the engine and monitor off the UI thread: loading signatures takes several seconds.
             {

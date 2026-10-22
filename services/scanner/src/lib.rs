@@ -18,6 +18,7 @@ pub mod quarantine;
 pub mod proc;
 pub mod relay;
 pub mod rules;
+pub mod selfupdate;
 pub mod queue;
 pub mod report;
 pub mod scanner;

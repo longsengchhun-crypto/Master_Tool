@@ -70,10 +70,11 @@ fn group_code_for(r: &Rig, user: i64, n: &mut i64) -> String {
     r.mock.add_start(*n, user, "Sam");
     *n += 1;
     assert!(until(15, || r.mock.texts_in(user).iter().any(|t| t.contains("What do you want to protect"))));
-    let before = r.mock.texts_in(user).len();
+    let steps = |r: &Rig| r.mock.texts_in(user).iter().filter(|t| t.contains("Make a new group called")).count();
+    let before = steps(r);
     r.mock.add_callback(*n, user, "m:group");
     *n += 1;
-    assert!(until(15, || r.mock.texts_in(user).len() > before));
+    assert!(until(15, || steps(r) > before));
     let urls = r.mock.last_urls(user);
     let url = urls.first().expect("a link button").clone();
     assert!(url.starts_with("https://t.me/sentrix_test_bot?startgroup=g_"), "{url}");
@@ -176,7 +177,7 @@ fn choosing_a_group_links_it_and_every_report_goes_to_the_persons_private_chat_n
 }
 
 #[test]
-fn a_link_only_works_for_the_person_it_was_made_for_in_a_group_they_administer_and_only_once() {
+fn a_link_only_works_for_the_person_it_was_made_for_in_a_group_they_are_in_and_only_once() {
     let r = rig();
     let mut n = 1;
     let code = group_code_for(&r, SAM, &mut n);
@@ -188,15 +189,16 @@ fn a_link_only_works_for_the_person_it_was_made_for_in_a_group_they_administer_a
     n += 1;
     assert!(until(15, || r.mock.texts_in(A).iter().any(|t| t.contains("made for someone else"))));
     assert!(r.store.group_get(A).unwrap().is_some_and(|g| !g.enabled));
-    // Sam is only a member of this other group: Telegram, not the message, decides who is an administrator.
+    // Telegram, not the message, decides who is in a group: here it says Sam is not in it.
     r.mock.add_group(B, &[KIM], false, false);
+    r.mock.set_not_in_group(B, SAM);
     r.mock.add_bot_joined(n, B, "Other", SAM);
     n += 1;
     r.mock.add_startgroup(n, B, n, SAM, &code);
     n += 1;
-    assert!(until(15, || r.mock.texts_in(B).iter().any(|t| t.contains("Only a group administrator"))));
+    assert!(until(15, || r.mock.texts_in(B).iter().any(|t| t.contains("not a member of this group"))));
     assert!(r.store.group_get(B).unwrap().is_some_and(|g| !g.enabled));
-    // Sam finally uses it in a group Sam administers: works. A second use does not.
+    // Sam finally uses it in a group Sam is in: works. A second use does not.
     r.mock.add_group(-1003333333333, &[SAM], false, false);
     r.mock.add_bot_joined(n, -1003333333333, "Mine", SAM);
     n += 1;
@@ -207,6 +209,32 @@ fn a_link_only_works_for_the_person_it_was_made_for_in_a_group_they_administer_a
     r.mock.add_startgroup(n, A, n, SAM, &code);
     assert!(until(15, || r.mock.texts_in(A).iter().any(|t| t.contains("expired or was already used"))), "a code works once");
     assert!(r.store.group_get(A).unwrap().is_some_and(|g| !g.enabled));
+    r.svc.stop();
+}
+
+#[test]
+fn an_ordinary_member_can_protect_a_group_but_cannot_take_over_one_someone_else_protects() {
+    let r = rig();
+    let mut n = 1;
+    // Sam is NOT an administrator of A (Kim is), just a member. That is enough to set up protection.
+    r.mock.add_group(A, &[KIM], false, false);
+    let code = group_code_for(&r, SAM, &mut n);
+    r.mock.add_bot_joined(n, A, "Design team", SAM);
+    n += 1;
+    r.mock.add_startgroup(n, A, n, SAM, &code);
+    n += 1;
+    assert!(until(15, || r.store.group_get(A).ok().flatten().is_some_and(|g| g.enabled && g.enabled_by == Some(SAM))), "a member can protect a group");
+    // Lee is also just a member and cannot take it over from Sam.
+    const LEE: i64 = 5003;
+    let code2 = group_code_for(&r, LEE, &mut n);
+    r.mock.add_startgroup(n, A, n, LEE, &code2);
+    n += 1;
+    assert!(until(15, || r.mock.texts_in(A).iter().any(|t| t.contains("Someone else already protects"))));
+    assert_eq!(r.store.group_get(A).unwrap().unwrap().enabled_by, Some(SAM));
+    // Kim, an administrator, can.
+    let code3 = group_code_for(&r, KIM, &mut n);
+    r.mock.add_startgroup(n, A, n, KIM, &code3);
+    assert!(until(15, || r.store.group_get(A).unwrap().is_some_and(|g| g.enabled_by == Some(KIM))), "an administrator may take over");
     r.svc.stop();
 }
 
@@ -413,6 +441,98 @@ fn two_people_each_get_reports_only_in_their_own_scan_history_group() {
     r.svc.stop();
 }
 
+const H3: i64 = -1006666666666; // a second Scan History group of Sam's
+
+#[test]
+fn a_person_can_have_many_scan_history_groups_and_every_one_gets_every_report() {
+    let r = rig();
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    std::thread::sleep(Duration::from_millis(50)); // distinct link times
+    make_history(&r, H3, SAM, &mut n);
+    assert_eq!(r.store.history_all(SAM).len(), 2, "the second one is added, not a replacement");
+    r.mock.add_group_document(n, A, 70, MEMBER, "both.pdf", b"%PDF-1.4 hello".to_vec(), None);
+    assert!(until(30, || r.mock.texts_in(H).iter().any(|t| t.contains("both.pdf")) && r.mock.texts_in(H3).iter().any(|t| t.contains("both.pdf"))), "H: {:?} H3: {:?}", r.mock.texts_in(H), r.mock.texts_in(H3));
+    std::thread::sleep(Duration::from_secs(1));
+    assert_eq!(r.mock.texts_in(H).iter().filter(|t| t.contains("both.pdf")).count(), 1, "once per room");
+    assert!(r.mock.texts_in(A).is_empty() && !r.mock.texts_in(SAM).iter().any(|t| t.contains("both.pdf")));
+    // Removing one leaves the other working.
+    r.mock.add_bot_removed(n + 1, H3, "Scan History");
+    assert!(until(15, || r.store.history_all(SAM).len() == 1));
+    assert_eq!(r.store.history_get(SAM).unwrap().0, H);
+    r.svc.stop();
+}
+
+#[test]
+fn the_bot_asks_which_scan_history_group_each_protected_group_reports_to_and_the_choice_is_respected() {
+    let r = rig();
+    let mut n = 1;
+    r.mock.add_start(n, SAM, "Sam");
+    n += 1;
+    make_history(&r, H, SAM, &mut n);
+    std::thread::sleep(Duration::from_millis(50));
+    make_history(&r, H3, SAM, &mut n);
+    assert_eq!(r.store.history_rooms(SAM).iter().map(|h| h.num).collect::<Vec<_>>(), vec![1, 2], "the rooms are numbered so they can be told apart");
+    assert!(until(15, || r.mock.texts_in(H3).iter().any(|t| t.contains("Scan History #2"))), "{:?}", r.mock.texts_in(H3));
+    // With two rooms, protecting a group makes the bot ask, privately.
+    link(&r, SAM, A, &mut n);
+    assert!(until(15, || r.mock.texts_in(SAM).iter().any(|t| t.contains("Where should reports from"))), "{:?}", r.mock.texts_in(SAM));
+    let b: Vec<(String, String)> = r.mock.last_buttons(SAM);
+    assert!(b.iter().any(|(l, _)| l == "Scan History #1") && b.iter().any(|(l, _)| l == "Scan History #2") && b.iter().any(|(l, _)| l.ends_with("All of them")), "{b:?}");
+    // Sam picks #1 for group A.
+    let pick = b.iter().find(|(l, _)| l == "Scan History #1").unwrap().1.clone();
+    assert_eq!(pick, format!("r:{A}:{H}"));
+    r.mock.add_callback(n, SAM, &pick);
+    n += 1;
+    assert!(until(15, || r.store.report_choice_get(A) == Some(H)));
+    // A second protected group goes to #2.
+    link(&r, SAM, B, &mut n);
+    r.mock.add_callback(n, SAM, &format!("r:{B}:{H3}"));
+    n += 1;
+    assert!(until(15, || r.store.report_choice_get(B) == Some(H3)));
+    r.mock.add_group_document(n, A, 90, MEMBER, "from-a.pdf", b"%PDF-1.4 a".to_vec(), None);
+    r.mock.add_group_document(n + 1, B, 91, MEMBER, "from-b.pdf", b"%PDF-1.4 b".to_vec(), None);
+    assert!(until(30, || r.mock.texts_in(H).iter().any(|t| t.contains("from-a.pdf")) && r.mock.texts_in(H3).iter().any(|t| t.contains("from-b.pdf"))));
+    std::thread::sleep(Duration::from_secs(1));
+    assert!(!r.mock.texts_in(H).iter().any(|t| t.contains("from-b.pdf")) && !r.mock.texts_in(H3).iter().any(|t| t.contains("from-a.pdf")), "each group reports only where it was told to");
+    // Many protected groups can report to the same room: send B to #1 as well.
+    r.mock.add_callback(n + 2, SAM, &format!("r:{B}:{H}"));
+    assert!(until(15, || r.store.report_choice_get(B) == Some(H)));
+    r.mock.add_group_document(n + 3, B, 92, MEMBER, "b-again.pdf", b"%PDF-1.4 c".to_vec(), None);
+    assert!(until(30, || r.mock.texts_in(H).iter().any(|t| t.contains("b-again.pdf"))));
+    // Someone else cannot change Sam's choice.
+    r.mock.add_start(n + 4, KIM, "Kim");
+    r.mock.add_callback(n + 5, KIM, &format!("r:{B}:all"));
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(r.store.report_choice_get(B), Some(H), "Kim cannot touch Sam's group");
+    // "All of them" clears the choice.
+    r.mock.add_callback(n + 6, SAM, &format!("r:{B}:all"));
+    assert!(until(15, || r.store.report_choice_get(B).is_none()));
+    r.svc.stop();
+}
+
+#[test]
+fn a_person_can_protect_many_groups_and_the_list_pages() {
+    let r = rig();
+    let mut n = 1;
+    let ids: Vec<i64> = (0..9).map(|i| -1001000000100 - i).collect();
+    for &g in &ids {
+        link(&r, SAM, g, &mut n);
+    }
+    assert_eq!(r.store.groups_list().unwrap().iter().filter(|g| g.enabled && g.enabled_by == Some(SAM)).count(), 9, "there is no limit of one");
+    r.mock.add_callback(n, SAM, "m:mine");
+    n += 1;
+    assert!(until(15, || r.mock.texts_in(SAM).iter().any(|t| t.contains("9 in total, page 1 of 2"))), "{:?}", r.mock.texts_in(SAM));
+    let b: Vec<String> = r.mock.last_buttons(SAM).into_iter().map(|(l, _)| l).collect();
+    assert!(b.contains(&"More groups".to_string()), "{b:?}");
+    r.mock.add_callback(n, SAM, "m:mine:1");
+    assert!(until(15, || r.mock.texts_in(SAM).iter().any(|t| t.contains("page 2 of 2"))));
+    let b: Vec<String> = r.mock.last_buttons(SAM).into_iter().map(|(l, _)| l).collect();
+    assert!(b.contains(&"Previous groups".to_string()) && !b.contains(&"More groups".to_string()), "{b:?}");
+    r.svc.stop();
+}
+
 #[test]
 fn a_group_with_the_right_name_is_not_used_by_someone_who_is_not_in_it() {
     let r = rig();
@@ -516,14 +636,14 @@ fn the_owner_can_pause_resume_and_remove_their_group_from_the_menu() {
 }
 
 #[test]
-fn someone_who_is_no_longer_an_administrator_cannot_resume_a_paused_group() {
+fn someone_who_has_left_the_group_cannot_resume_a_paused_group() {
     let r = rig();
     let mut n = 1;
     link(&r, SAM, A, &mut n);
     r.mock.add_callback(n, SAM, &format!("g:off:{A}"));
     n += 1;
     assert!(until(15, || r.store.group_get(A).unwrap().is_some_and(|g| !g.enabled)));
-    r.mock.add_group(A, &[KIM], false, false); // Sam was demoted
+    r.mock.set_not_in_group(A, SAM); // Sam left the group
     r.mock.add_callback(n, SAM, &format!("g:on:{A}"));
     assert!(until(15, || r.mock.state.lock().unwrap().answered.len() >= 3));
     assert!(r.store.group_get(A).unwrap().is_some_and(|g| !g.enabled));

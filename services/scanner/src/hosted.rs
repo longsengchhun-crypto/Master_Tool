@@ -64,7 +64,7 @@ fn back() -> Vec<Button> {
     vec![Button::callback("Back to menu", "m:main")]
 }
 
-const HOW_IT_WORKS: &str = "<b>How SENTRIX works</b>\nI check files for malware and tell you what I find, here, privately.\n\n<b>Groups.</b> You add me to a group you administer. I check documents people post there (up to 20 MB). The results come only to you, never into the group. Files are checked and deleted straight away.\n\n<b>Your account.</b> The SENTRIX app on your own computer checks files that reach your Telegram account. Your Telegram login stays on your computer. The app sends me only the result to pass on to you.\n\n<b>Limits.</b> I cannot see secret chats, photos and videos are not checked, and files over 20 MB in groups are not checked. \"Not checked\" never means safe. No antivirus catches everything.";
+const HOW_IT_WORKS: &str = "<b>How SENTRIX works</b>\nI check files for malware and tell you what I find, here, privately.\n\n<b>Groups.</b> You add me to as many groups as you like, as long as you are in them. I check documents people post there (up to 20 MB). The results go to your <b>Scan History</b> group(s), never into the protected group. Files are checked and deleted straight away.\n\n<b>Your account.</b> The SENTRIX app on your own computer checks files that reach your Telegram account. Your Telegram login stays on your computer. The app sends me only the result to pass on to you.\n\n<b>Limits.</b> I cannot see secret chats, photos and videos are not checked, and files over 20 MB in groups are not checked. \"Not checked\" never means safe. No antivirus catches everything.";
 
 impl Inner {
     fn hosted_download_url(&self) -> String {
@@ -143,7 +143,7 @@ impl Inner {
         self.private_say(
             bot,
             uid,
-            "<b>Protect a group</b>\n1. Make a new group called <b>Scan History</b> and add me to it. This is where the results will appear, so the group you protect stays quiet. You can add other people to it too: everyone in it can read the results.\n2. Press <b>Choose a group</b> below and pick the group to protect. Telegram adds me to it. You must be an administrator there.\n3. I confirm here as soon as it is ready.\n\nI check documents people post in the group (up to 20 MB) and delete them straight away. Until your Scan History group exists, results come to this chat.\n\nThe button works for 30 minutes.",
+            "<b>Protect a group</b>\n1. Make a new group called <b>Scan History</b> and add me to it. I notice it by myself and start sending results there, so the group you protect stays quiet. You can add other people to it too: everyone in it can read the results. Make as many Scan History groups as you like, and every one gets every result.\n2. Press <b>Choose a group</b> below and pick the group to protect. Telegram adds me to it. You only need to be a member of it, not an administrator. Protect as many groups as you like: come back here and press the button again for each one.\n3. I confirm in your Scan History group as soon as it is ready.\n\nI check documents people post in the group (up to 20 MB) and delete them straight away. Until a Scan History group exists, results come to this chat.\n\nThe button works for 30 minutes.",
             &[vec![Button::url("Choose a group", &url)], back()],
         );
     }
@@ -163,27 +163,58 @@ impl Inner {
         );
     }
 
+    /// How many protected groups one page of "My protection" lists. A person can protect any number of groups; the list pages.
+    const MINE_PAGE: usize = 6;
+
     fn show_mine(&self, bot: &BotClient, uid: i64) {
+        self.show_mine_page(bot, uid, 0)
+    }
+
+    fn show_mine_page(&self, bot: &BotClient, uid: i64, page: usize) {
         let groups: Vec<Group> = self.store.groups_list().unwrap_or_default().into_iter().filter(|g| g.enabled_by == Some(uid) && g.left_at.is_none()).collect();
         let devices = self.store.devices_of(uid);
         let mut t = String::from("<b>Your protection</b>\n");
-        t += &match self.store.history_get(uid) {
-            Some((_, title)) => format!("Results go to your <b>{}</b> group.\n", safe_display_name(&title)),
-            None => "Results come to this chat. Make a group called <b>Scan History</b> and add me to it to receive them there.\n".to_string(),
+        let history = self.store.history_rooms(uid);
+        t += &match history.len() {
+            0 => "Results come to this chat. Make a group called <b>Scan History</b> and add me to it to receive them there.\n".to_string(),
+            1 => format!("Results go to your <b>{}</b> group.\n", safe_display_name(&history[0].title)),
+            n => format!("You have {n} Scan History groups (#{}). Each protected group below reports to the one you chose.\n", history.iter().map(|h| h.num.to_string()).collect::<Vec<_>>().join(", #")),
         };
+        let pages = groups.len().div_ceil(Self::MINE_PAGE).max(1);
+        let page = page.min(pages - 1);
         let mut rows: Vec<Vec<Button>> = vec![];
-        t += "\n<b>Groups</b>\n";
+        t += &format!("\n<b>Groups</b>{}\n", if groups.len() > Self::MINE_PAGE { format!(" ({} in total, page {} of {pages})", groups.len(), page + 1) } else { String::new() });
         if groups.is_empty() {
-            t += "None yet. Choose <b>Protect a group</b> to add one.\n";
+            t += "None yet. Choose <b>Protect a group</b> to add one. There is no limit.\n";
         }
-        for g in &groups {
+        let rooms = self.store.history_rooms(uid);
+        for g in groups.iter().skip(page * Self::MINE_PAGE).take(Self::MINE_PAGE) {
+            let short_name: String = g.title.chars().filter(|c| !c.is_control()).take(14).collect();
             let day = self.store.group_stats(g.chat_id, now_ms() - 86_400_000).unwrap_or_default();
             let name = safe_display_name(&g.title);
             t += &format!("{}: {}. Today {} checked, {} threat{}.\n", name, if g.enabled { "protected" } else { "paused" }, day.scans, day.threats, if day.threats == 1 { "" } else { "s" });
             let short: String = g.title.chars().filter(|c| !c.is_control()).take(18).collect();
+            if rooms.len() > 1 {
+                let to = match self.store.report_choice_get(g.chat_id).and_then(|h| rooms.iter().find(|r| r.chat_id == h)) {
+                    Some(r) => format!("Reports to: Scan History #{}", r.num),
+                    None => "Reports to: all Scan History groups".to_string(),
+                };
+                t += &format!("   {to}\n");
+                rows.push(vec![Button::callback(&format!("Change where {short_name} reports"), &format!("r:{}", g.chat_id))]);
+            }
             let mut row = vec![if g.enabled { Button::callback(&format!("Pause {short}"), &format!("g:off:{}", g.chat_id)) } else { Button::callback(&format!("Resume {short}"), &format!("g:on:{}", g.chat_id)) }];
             row.push(Button::callback("Remove", &format!("g:rm:{}", g.chat_id)));
             rows.push(row);
+        }
+        if pages > 1 {
+            let mut nav = vec![];
+            if page > 0 {
+                nav.push(Button::callback("Previous groups", &format!("m:mine:{}", page - 1)));
+            }
+            if page + 1 < pages {
+                nav.push(Button::callback("More groups", &format!("m:mine:{}", page + 1)));
+            }
+            rows.push(nav);
         }
         t += "\n<b>Your computers</b>\n";
         if devices.is_empty() {
@@ -207,6 +238,7 @@ impl Inner {
             ["m", "group"] => self.show_group_steps(bot, me, uid),
             ["m", "account"] => self.show_account(bot, me, uid),
             ["m", "mine"] => self.show_mine(bot, uid),
+            ["m", "mine", p] => self.show_mine_page(bot, uid, p.parse().unwrap_or(0)),
             ["m", "help"] => self.private_say(bot, uid, HOW_IT_WORKS, &[back()]),
             ["g", act @ ("off" | "on" | "rm"), id] => {
                 let Some(chat) = id.parse::<i64>().ok() else { return };
@@ -222,10 +254,10 @@ impl Inner {
                             self.event("group_disabled", "info", "A group was paused by the person who protects it.");
                         }
                         "on" => match bot.get_chat_member(chat, uid) {
-                            Ok(m) if m.is_admin() => {
+                            Ok(m) if m.is_member() => {
                                 let _ = self.store.group_set_enabled(chat, true, uid, now);
                             }
-                            _ => note = Some("You are no longer an administrator of that group, so it cannot be resumed."),
+                            _ => note = Some("You are no longer in that group, so it cannot be resumed."),
                         },
                         _ => {
                             let _ = bot.leave_chat(chat);
@@ -236,6 +268,28 @@ impl Inner {
                 }
                 self.show_mine(bot, uid);
             }
+            ["r", id] => {
+                let Some(chat) = id.parse::<i64>().ok() else { return };
+                if matches!(self.store.group_get(chat), Ok(Some(g)) if g.enabled_by == Some(uid) && g.left_at.is_none()) {
+                    self.ask_where_to_report(bot, uid, chat);
+                } else {
+                    note = Some("That group is not yours to change.");
+                }
+            }
+            ["r", id, dest] => {
+                let Some(chat) = id.parse::<i64>().ok() else { return };
+                let mine = matches!(self.store.group_get(chat), Ok(Some(g)) if g.enabled_by == Some(uid) && g.left_at.is_none());
+                let rooms = self.store.history_rooms(uid);
+                let choice = if *dest == "all" { Some(None) } else { dest.parse::<i64>().ok().filter(|d| rooms.iter().any(|r| r.chat_id == *d)).map(Some) };
+                match (mine, choice) {
+                    (true, Some(c)) => {
+                        self.store.report_choice_set(chat, c);
+                        note = Some("Saved.");
+                        self.show_mine(bot, uid);
+                    }
+                    _ => note = Some("That choice is not available any more."),
+                }
+            }
             ["d", "rm", id] => {
                 if !self.store.device_revoke(uid, id, now) {
                     note = Some("That computer is not linked to you.");
@@ -245,6 +299,23 @@ impl Inner {
             _ => {}
         }
         let _ = bot.answer_callback(&cb.id, note);
+    }
+
+    /// "Which Scan History group should this protected group report to?" One button per room, plus all of them.
+    pub(crate) fn ask_where_to_report(&self, bot: &BotClient, uid: i64, group_chat: i64) {
+        let rooms = self.store.history_rooms(uid);
+        let current = self.store.report_choice_get(group_chat);
+        let name = self.store.group_get(group_chat).ok().flatten().map(|g| safe_display_name(&g.title)).unwrap_or_else(|| "this group".into());
+        let mut rows: Vec<Vec<Button>> = rooms
+            .iter()
+            .map(|r| {
+                let mark = if current == Some(r.chat_id) { "✓ " } else { "" };
+                vec![Button::callback(&format!("{mark}Scan History #{}", r.num), &format!("r:{group_chat}:{}", r.chat_id))]
+            })
+            .collect();
+        rows.push(vec![Button::callback(&format!("{}All of them", if current.is_none() { "✓ " } else { "" }), &format!("r:{group_chat}:all"))]);
+        rows.push(back());
+        self.private_say(bot, uid, &format!("<b>Where should reports from {name} go?</b>\nEach Scan History group has a number, shown at the top of its welcome message. Many protected groups can report to the same one."), &rows);
     }
 
     /// `/start g_<code>` posted in a group by the person who pressed "Choose a group". This is the only way a group gets
@@ -264,10 +335,19 @@ impl Inner {
         if u.from_id != Some(owner) {
             return say("who", "This link was made for someone else. Open the SENTRIX bot privately and make your own.".into());
         }
+        // Any member of the group can set up protection, not only administrators. Telegram, not the message, says who is in it.
         match bot.get_chat_member(chat, owner) {
             Ok(m) if m.is_admin() => {}
-            Ok(_) => return say("admin", "Only a group administrator can protect this group.".into()),
-            Err(_) => return say("admin", "I could not verify that you are an administrator, so nothing was changed.".into()),
+            Ok(m) if m.is_member() => {
+                // A member may protect a group nobody protects yet. Taking over a group someone else already protects needs
+                // an administrator, so a member cannot quietly redirect another person's reports.
+                let taken = matches!(self.store.group_get(chat), Ok(Some(g)) if g.enabled && g.left_at.is_none() && g.enabled_by.is_some_and(|o| o != owner));
+                if taken {
+                    return say("taken", "Someone else already protects this group. A group administrator can take it over.".into());
+                }
+            }
+            Ok(_) => return say("admin", "You are not a member of this group, so you cannot protect it.".into()),
+            Err(_) => return say("admin", "I could not verify that you are in this group, so nothing was changed.".into()),
         }
         if !self.store.user_reachable(owner) {
             return say("start", "Open the SENTRIX bot privately and press Start first, so I can send you the results.".into());
@@ -286,6 +366,12 @@ impl Inner {
             t += "\n\n<b>One more step.</b> Telegram is hiding the group's files from me. Make me an administrator of the group (no special rights needed) so I can see them.";
         }
         match self.store.history_get(owner) {
+            Some(_) if self.store.history_rooms(owner).len() > 1 => {
+                // Several Scan History groups: ask which one this group reports to (until answered, all of them get it).
+                let _ = self.store.report_choice_set(chat, None);
+                self.private_say(bot, owner, &format!("{t}\n\nYou have more than one Scan History group, so tell me where this group's results should go."), &[]);
+                self.ask_where_to_report(bot, owner, chat);
+            }
             Some((h, _)) => {
                 let _ = self.store.enqueue_notification_to(&format!("linked:{chat}:{}", u.update_id), "hosted_notice", &t, now, Some(h), None);
             }

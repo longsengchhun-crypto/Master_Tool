@@ -10,7 +10,12 @@
 //!   SENTRIX_CLAMAV_DIR      folder with clamd/freshclam (without it every file is reported "not checked", never clean)
 //!   SENTRIX_RELAY_BIND      address for the app relay, default 127.0.0.1:8787 (put HTTPS in front of it)
 //!   SENTRIX_TRUST_PROXY     1 when a reverse proxy you control sets X-Forwarded-For
-//!   SENTRIX_DOWNLOAD_URL    where the bot tells people to get the desktop app
+//!   SENTRIX_DOWNLOAD_URL    where the bot tells people to get the desktop app (default: the newest release on GitHub)
+//!   SENTRIX_BOT_UPDATE_URL  where to look for new versions of this service (default: the GitHub release feed); `off` disables
+//!
+//! The service updates itself: about every 30 minutes it asks the release feed for a newer version, checks its checksum and
+//! its signature (same key as the desktop app), swaps itself for it and starts again. Run it from a scheduled task or a
+//! service wrapper so it also starts at boot (scripts/install-bot-autostart.ps1).
 //!
 //! `--check` validates the configuration, asks Telegram who the bot is, prints the bot's username and exits.
 
@@ -51,6 +56,56 @@ fn load_env_file(path: &std::path::Path) {
     }
 }
 
+/// The newest desktop installer. The release always carries a copy under this fixed name.
+const DEFAULT_DOWNLOAD_URL: &str = "https://github.com/longsengchhun-crypto/Master_Tool/releases/latest/download/SENTRIX-setup.exe";
+
+/// Look for a newer version of this service about every 30 minutes and switch to it when one is found and verified.
+fn start_self_update(svc: Arc<ProtectionService>, clam: Option<Arc<ClamEngine>>) {
+    use sentrix_core::selfupdate as su;
+    let feed = std::env::var("SENTRIX_BOT_UPDATE_URL").unwrap_or_else(|_| su::DEFAULT_FEED.into());
+    if feed.trim().eq_ignore_ascii_case("off") {
+        println!("[botd] automatic updates are off");
+        return;
+    }
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(60));
+        loop {
+            match su::check(&feed, su::PUBLIC_KEY, su::CURRENT_VERSION) {
+                Ok(Some(u)) => {
+                    println!("[botd] version {} is available ({}). Installing and restarting.", u.version, u.notes.lines().next().unwrap_or("").trim());
+                    let Ok(exe) = std::env::current_exe() else { continue };
+                    match su::install_over(&exe, &u.bytes) {
+                        Ok(()) => {
+                            // Let go of everything the new copy needs (the Telegram connection, the scan engine, the database)
+                            // before it starts, then hand over.
+                            svc.stop();
+                            if let Some(c) = &clam {
+                                c.stop();
+                            }
+                            // Under the autostart wrapper (SENTRIX_SUPERVISED) the wrapper starts the new copy; started by hand,
+                            // this copy starts it itself.
+                            if std::env::var_os("SENTRIX_SUPERVISED").is_some() {
+                                std::process::exit(10);
+                            }
+                            match su::restart(&exe) {
+                                Ok(()) => std::process::exit(0),
+                                Err(e) => {
+                                    println!("[botd] WARNING: the update was installed but could not be started ({e}). Start sentrix-botd again by hand.");
+                                    std::process::exit(3);
+                                }
+                            }
+                        }
+                        Err(e) => println!("[botd] the update could not be installed: {e}"),
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => println!("[botd] update check: {e}"),
+            }
+            std::thread::sleep(Duration::from_secs(30 * 60));
+        }
+    });
+}
+
 fn die(msg: &str) -> ! {
     eprintln!("sentrix-botd: {msg}");
     std::process::exit(2);
@@ -66,6 +121,9 @@ fn main() {
     }
     load_env_file(&PathBuf::from(".sentrix-dev/bot.env"));
 
+    if let Ok(exe) = std::env::current_exe() {
+        sentrix_core::selfupdate::cleanup(&exe); // what the previous update left behind
+    }
     let Ok(token) = std::env::var("SENTRIX_BOT_TOKEN") else { die("SENTRIX_BOT_TOKEN is not set.") };
     let bot = match BotClient::new(token.trim()) {
         Ok(b) => b,
@@ -76,7 +134,7 @@ fn main() {
         Err(e) => die(&format!("Telegram did not accept the bot token: {}", e.user_message())),
     };
     let username = me.username.clone().unwrap_or_default();
-    println!("[botd] bot @{username}");
+    println!("[botd] version {} - bot @{username}", sentrix_core::selfupdate::CURRENT_VERSION);
     if me.can_read_all_group_messages == Some(false) {
         println!("[botd] WARNING: BotFather privacy mode is ON. The bot cannot see files in groups unless it is made an administrator there. Fix it once for everyone: @BotFather > /setprivacy > choose this bot > Disable, then remove and re-add the bot in existing groups.");
     }
@@ -118,15 +176,17 @@ fn main() {
     } else {
         println!("[botd] WARNING: SENTRIX_CLAMAV_DIR is not set. Files will be reported as not checked.");
     }
-    let scanner = Arc::new(Scanner::new(Limits::default(), clam));
+    let scanner = Arc::new(Scanner::new(Limits::default(), clam.clone()));
 
     let mut cfg = ServiceConfig::new(data_dir.join("tmp"));
     cfg.realtime = false;
     cfg.group_shield = true;
-    cfg.hosted = Some(HostedConfig { download_url: std::env::var("SENTRIX_DOWNLOAD_URL").unwrap_or_default() });
-    let svc = ProtectionService::new(scanner, quarantine, store.clone(), Arc::new(LogHooks), cfg);
+    cfg.hosted = Some(HostedConfig { download_url: std::env::var("SENTRIX_DOWNLOAD_URL").ok().filter(|u| !u.trim().is_empty()).unwrap_or_else(|| DEFAULT_DOWNLOAD_URL.into()) });
+    let clam_for_update = clam.clone();
+    let svc = Arc::new(ProtectionService::new(scanner, quarantine, store.clone(), Arc::new(LogHooks), cfg));
     svc.set_bot(Some(Arc::new(bot)));
     svc.start();
+    start_self_update(svc.clone(), clam_for_update);
 
     let bind = std::env::var("SENTRIX_RELAY_BIND").unwrap_or_else(|_| "127.0.0.1:8787".into());
     let trust = std::env::var("SENTRIX_TRUST_PROXY").map(|v| v == "1").unwrap_or(false);
