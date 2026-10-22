@@ -33,9 +33,11 @@ pub const CONSENT_WINDOW_MS: i64 = 5 * 60 * 1000;
 /// The group each person makes to receive the reports of the groups they protect.
 pub const HISTORY_GROUP_NAME: &str = "Scan History";
 
-/// "Scan History" in any capitalisation, ignoring extra spaces. Nothing else counts: no prefixes, no look-alikes.
+/// "Scan History" or "Scans History" (people write both), in any capitalisation, ignoring extra spaces. Nothing else
+/// counts: no prefixes, no look-alikes.
 pub fn is_history_title(t: &str) -> bool {
-    t.split_whitespace().collect::<Vec<_>>().join(" ").eq_ignore_ascii_case(HISTORY_GROUP_NAME)
+    let name = t.split_whitespace().collect::<Vec<_>>().join(" ");
+    name.eq_ignore_ascii_case(HISTORY_GROUP_NAME) || name.eq_ignore_ascii_case("Scans History")
 }
 
 #[derive(Default)]

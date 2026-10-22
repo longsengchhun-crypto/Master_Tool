@@ -296,6 +296,17 @@ fn adding_the_bot_to_a_group_called_scan_history_links_it_automatically_and_it_i
 }
 
 #[test]
+fn the_name_is_forgiving_about_capitals_spaces_and_the_plural_but_not_about_look_alikes() {
+    use sentrix_core::group::is_history_title as ok;
+    for yes in ["Scan History", "scan history", "  SCAN   HISTORY ", "Scans History", "scans history"] {
+        assert!(ok(yes), "{yes:?}");
+    }
+    for no in ["Scan History 2", "My Scan History", "Scan Histor", "ScanHistory", "Scan  Hist0ry", "Scans Histories", ""] {
+        assert!(!ok(no), "{no:?} must not count");
+    }
+}
+
+#[test]
 fn every_report_goes_to_the_scan_history_group_and_the_protected_group_stays_silent() {
     let r = rig();
     let mut n = 1;
