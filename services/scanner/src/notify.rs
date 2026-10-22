@@ -188,6 +188,9 @@ pub fn deliver_due_at(store: &JobStore, client: &dyn Courier, chat_id: i64, max:
                         // A person who blocked the bot cannot be written to until they press Start again.
                         if g > 0 {
                             store.user_set_blocked(g, true);
+                        } else {
+                            // The bot cannot post in this group any more: it can no longer be somebody's Scan History.
+                            store.history_clear_chat(g);
                         }
                         let _ = store.group_left(g, now);
                         store.add_event("group_removed", "warning", "The bot can no longer post in a group (removed or blocked). Protection for it was turned off.", now);

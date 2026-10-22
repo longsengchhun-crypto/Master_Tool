@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { ArrowRight, Check, FileSearch, MessageCircle, Paperclip } from 'lucide-react';
+import { ArrowRight, FileSearch, MessageCircle, Paperclip } from 'lucide-react';
 import type { TelegramStatus } from '../lib/types';
 import { Button, Card, Notice } from '../components/ui';
 
@@ -13,27 +13,15 @@ export async function openLink(url: string) {
   }
 }
 
+/** The bot's link with a built-in action: `account` shows the link code the moment Start is pressed, `group` the group steps. */
+export function botLink(base: string | null, action: 'account' | 'group'): string | null {
+  return base ? `${base}?start=${action}` : null;
+}
+
 /** `ABCD-EFGH`, whatever the person typed or pasted. */
 export function formatCode(raw: string): string {
   const c = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8);
   return c.length > 4 ? `${c.slice(0, 4)}-${c.slice(4)}` : c;
-}
-
-function Step({ n, done, active, title, children }: { n: number; done?: boolean; active?: boolean; title: string; children?: React.ReactNode }) {
-  return (
-    <li className="flex gap-4">
-      <div className="flex flex-col items-center">
-        <span className={`grid size-7 shrink-0 place-items-center rounded-full border text-xs font-semibold ${done ? 'border-ok bg-okbg text-ok' : active ? 'border-accent bg-accent text-accentink' : 'border-strong text-muted'}`}>
-          {done ? <Check className="size-3.5" aria-label="Done" /> : n}
-        </span>
-        <span className="mt-1 w-px flex-1 bg-line" aria-hidden />
-      </div>
-      <div className="min-w-0 flex-1 pb-6">
-        <h3 className={`text-sm font-semibold ${active || done ? 'text-ink' : 'text-muted'}`}>{title}</h3>
-        {children && <div className="mt-1 text-sm text-muted">{children}</div>}
-      </div>
-    </li>
-  );
 }
 
 /** Where a result goes, in three plain boxes. */
@@ -50,58 +38,87 @@ function Flow() {
   );
 }
 
+/** A picture of what the person is about to see in Telegram, so nothing there is a surprise. It is labelled as a preview. */
+function ChatPreview({ bot }: { bot: string }) {
+  return (
+    <figure className="w-full max-w-[19rem] shrink-0 rounded-2xl border border-line bg-surface2 p-3.5">
+      <figcaption className="mb-2 flex items-center justify-between text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted">
+        <span>What you will see</span>
+        <span className="rounded bg-surface px-1.5 py-0.5 normal-case tracking-normal">Preview</span>
+      </figcaption>
+      <div className="space-y-2 text-[0.8rem] leading-snug">
+        <div className="ml-auto w-fit rounded-2xl rounded-br-md bg-accent px-3 py-1.5 text-accentink">Start</div>
+        <div className="max-w-[16rem] rounded-2xl rounded-bl-md border border-line bg-surface px-3 py-2 text-ink">
+          <div className="font-semibold">Protect my account</div>
+          <div className="mt-1 text-muted">Type this code in the SENTRIX app:</div>
+          <div className="mt-1.5 rounded-md bg-surface2 py-1.5 text-center font-mono text-base tracking-[0.25em] text-ink">AB7K-9QXD</div>
+          <div className="mt-2 rounded-md border border-line py-1 text-center text-[0.72rem] text-muted">Get a new code</div>
+        </div>
+        <p className="pt-1 text-[0.7rem] text-muted">From @{bot}. Your real code will be different.</p>
+      </div>
+    </figure>
+  );
+}
+
 export function TelegramSetup({ t, busy, onLink }: { t: TelegramStatus; busy: boolean; onLink: (code: string) => void }) {
   const [code, setCode] = useState('');
   const r = t.relay;
   const ready = code.replace(/[^A-Za-z0-9]/g, '').length === 8;
+  const link = botLink(r.botLink, 'account');
   return (
-    <Card className="p-6">
+    <Card className="p-7">
       {r.removedRemotely && (
         <div className="mb-5">
           <Notice tone="warn" title="This computer was unlinked in the bot">Results are not reaching you. Link it again below.</Notice>
         </div>
       )}
-      <h2 className="text-lg font-semibold tracking-tight text-ink">Get results in Telegram</h2>
-      <p className="mt-1 max-w-xl text-sm text-muted">SENTRIX has its own bot. You do not make one. Link this computer to your chat with it once, and every result arrives there, privately.</p>
+      <div className="flex flex-wrap gap-x-10 gap-y-7">
+        <div className="min-w-0 flex-1 basis-80">
+          <h2 className="font-display text-2xl font-semibold text-ink">Get your results in Telegram</h2>
+          <p className="mt-1.5 max-w-md text-sm text-muted">SENTRIX has its own bot, so you do not make one. Link this computer once, and every result arrives in your private chat.</p>
 
-      <ol className="mt-6">
-        <Step n={1} active title={`Open @${r.botUsername ?? 'the SENTRIX bot'} and press Start`}>
-          <p>Telegram opens a chat with the bot. Press <span className="font-medium text-ink">Start</span>. That is how the bot learns it may write to you.</p>
-          {r.botLink && <div className="mt-3"><Button variant="primary" onClick={() => void openLink(r.botLink!)}>Open the bot in Telegram</Button></div>}
-        </Step>
-        <Step n={2} active title="Choose Protect my account">
-          <p>The bot offers two choices. Choose <span className="font-medium text-ink">Protect my account</span> and it shows a code. (<span className="font-medium text-ink">Protect a group</span> works without this app: the bot walks you through it.)</p>
-        </Step>
-        <li className="flex gap-4">
-          <span className="grid size-7 shrink-0 place-items-center rounded-full border border-accent bg-accent text-xs font-semibold text-accentink">3</span>
-          <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-semibold text-ink">Type the code here</h3>
-            <form
-              className="mt-2 flex max-w-sm gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (ready) onLink(code);
-              }}
-            >
-              <input
-                value={code}
-                onChange={(e) => setCode(formatCode(e.target.value))}
-                inputMode="text"
-                autoCapitalize="characters"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="ABCD-EFGH"
-                aria-label="Code from the bot"
-                className="h-10 w-44 rounded-lg border border-strong bg-solid px-3 font-mono text-base tracking-widest text-ink placeholder:text-faint"
-              />
-              <Button type="submit" variant="primary" busy={busy} disabled={!ready}>Link this computer</Button>
-            </form>
-            <p className="mt-1.5 text-xs text-muted">The code works once and for 10 minutes. Ask the bot for a new one if it has expired.</p>
-          </div>
-        </li>
-      </ol>
+          <ol className="mt-6 space-y-6">
+            <li className="flex gap-4">
+              <span className="grid size-8 shrink-0 place-items-center rounded-full bg-accent font-display text-sm font-semibold text-accentink">1</span>
+              <div>
+                <h3 className="text-sm font-semibold text-ink">Open the bot and press Start</h3>
+                <p className="mt-0.5 text-sm text-muted">The bot answers with a code straight away.</p>
+                {link && <div className="mt-3"><Button variant="primary" onClick={() => void openLink(link)}>Open @{r.botUsername} in Telegram</Button></div>}
+              </div>
+            </li>
+            <li className="flex gap-4">
+              <span className="grid size-8 shrink-0 place-items-center rounded-full bg-accent font-display text-sm font-semibold text-accentink">2</span>
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-ink">Type the code here</h3>
+                <form
+                  className="mt-2.5 flex flex-wrap gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (ready) onLink(code);
+                  }}
+                >
+                  <input
+                    value={code}
+                    onChange={(e) => setCode(formatCode(e.target.value))}
+                    inputMode="text"
+                    autoCapitalize="characters"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="ABCD-EFGH"
+                    aria-label="Code from the bot"
+                    className="h-11 w-48 rounded-xl border border-strong bg-solid px-3.5 font-mono text-lg tracking-[0.2em] text-ink placeholder:text-faint"
+                  />
+                  <Button type="submit" variant="primary" busy={busy} disabled={!ready} className="h-11 px-5">Link this computer</Button>
+                </form>
+                <p className="mt-1.5 text-xs text-muted">Works once, for 10 minutes. If it expires, press Get a new code in the bot.</p>
+              </div>
+            </li>
+          </ol>
+        </div>
+        {r.botUsername && <ChatPreview bot={r.botUsername} />}
+      </div>
 
-      <div className="mt-6 border-t border-line pt-5">
+      <div className="mt-8 border-t border-line pt-5">
         <Flow />
         <p className="mt-4 max-w-2xl text-xs text-muted">What leaves this computer is the text of each result (file name, verdict, time), sent to the SENTRIX bot so it can reach your chat. Files are checked here and are never uploaded. Your Telegram login is never asked for and never sent.</p>
       </div>

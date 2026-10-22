@@ -13,7 +13,7 @@
     "dialog:allow-message",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://t.me/*" }]
+      "allow": [{ "url": "https://t.me/*" }, { "url": "https://t.me/*?*" }]
     },
     "notification:default",
     "autostart:allow-enable",

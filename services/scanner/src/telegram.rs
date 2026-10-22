@@ -159,6 +159,10 @@ impl Member {
     pub fn is_admin(&self) -> bool {
         self.status == "creator" || self.status == "administrator"
     }
+    /// Currently in the chat (not left, removed or never joined).
+    pub fn is_member(&self) -> bool {
+        matches!(self.status.as_str(), "creator" | "administrator" | "member" | "restricted")
+    }
     /// The chat creator can always delete; an administrator needs the explicit right.
     pub fn may_delete(&self) -> bool {
         self.status == "creator" || (self.status == "administrator" && self.can_delete_messages)

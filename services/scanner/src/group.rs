@@ -30,6 +30,14 @@ pub const URGENT_MSGS_PER_MIN: usize = 20;
 /// An administrator has this long to confirm turning on automatic deletion.
 pub const CONSENT_WINDOW_MS: i64 = 5 * 60 * 1000;
 
+/// The group each person makes to receive the reports of the groups they protect.
+pub const HISTORY_GROUP_NAME: &str = "Scan History";
+
+/// "Scan History" in any capitalisation, ignoring extra spaces. Nothing else counts: no prefixes, no look-alikes.
+pub fn is_history_title(t: &str) -> bool {
+    t.split_whitespace().collect::<Vec<_>>().join(" ").eq_ignore_ascii_case(HISTORY_GROUP_NAME)
+}
+
 #[derive(Default)]
 pub(crate) struct GroupState {
     pub bot_info: Mutex<Option<(BotInfo, Instant)>>,
@@ -83,7 +91,7 @@ fn ago_text(ms: Option<i64>) -> String {
 
 const HELP: &str = "<b>SENTRIX Group Shield</b>\nI scan files posted in this group on the bot owner's computer and report threats.\n\n/status: protection state\n/scanstatus: scan counts\n/report: administrators get a summary of the last 7 days\n/setup: administrators turn protection on or off\n\n<b>Limits</b>\nOnly files sent as documents, up to 20 MB, and only while the owner's computer is on. Photos, videos and voice messages are not scanned. If I cannot see a file (Telegram privacy mode) or cannot check it fully, it is not reported as safe.";
 
-const HELP_HOSTED: &str = "<b>SENTRIX</b>\nI check files posted in this group and tell the administrator who set me up, privately. Nothing about scan results is posted here.\n\n/status: protection state\n/scanstatus: scan counts\n/report: administrators get a summary privately\n/setup: administrators turn protection on or off\n\n<b>Limits</b>\nOnly files sent as documents, up to 20 MB. Photos, videos and voice messages are not checked. If I cannot see a file (Telegram privacy mode) or cannot check it fully, it is not reported as safe.";
+const HELP_HOSTED: &str = "<b>SENTRIX</b>\nI check files posted in this group. The results go to the Scan History group of the administrator who set me up, never here.\n\n/status: protection state\n/scanstatus: scan counts\n/report: administrators get a summary privately\n/setup: administrators turn protection on or off\n\n<b>Limits</b>\nOnly files sent as documents, up to 20 MB. Photos, videos and voice messages are not checked. If I cannot see a file (Telegram privacy mode) or cannot check it fully, it is not reported as safe.";
 
 impl Inner {
     /// The bot's own details, refreshed every ten minutes. Also records whether privacy mode hides group files from it.
@@ -137,6 +145,19 @@ impl Inner {
             return;
         }
         let now = now_ms();
+        if self.cfg.read().unwrap().hosted.is_some() {
+            let title = u.chat_title.as_deref().unwrap_or("");
+            if is_history_title(title) {
+                // A group called "Scan History" is where reports go. It is never scanned or protected itself.
+                self.on_history_group(bot, u);
+                return;
+            }
+            if u.member_change.is_none() && self.store.history_chat_known(u.chat_id) {
+                // It was a Scan History group and has been renamed: it stops receiving reports.
+                self.store.history_clear_chat(u.chat_id);
+                self.event("history_unlinked", "info", "A Scan History group was renamed, so reports no longer go there.");
+            }
+        }
         if let Some(mc) = &u.member_change {
             self.on_membership(u, mc);
             return;
@@ -160,6 +181,18 @@ impl Inner {
             }
         }
         if !shield || !g.enabled {
+            // Shared bot: a file arrived but nobody has switched protection on. Say so once an hour instead of staying silent,
+            // so an administrator who only added the bot knows what is missing. Nothing about the file is said.
+            if shield && u.document.is_some() && self.cfg.read().unwrap().hosted.is_some() && self.notice_due(u.chat_id, "not_on", Duration::from_secs(3600)) {
+                let _ = self.say(
+                    u.chat_id,
+                    u.message_id,
+                    &format!("noton:{}", u.update_id),
+                    "group_notice",
+                    "<b>SENTRIX is in this group, but protection is not on, so this file was not checked.</b> A group administrator turns it on: open the SENTRIX bot in a private chat, press Start, choose Protect a group, then Choose a group. Results are sent to that person privately, not posted here.".into(),
+                    false,
+                );
+            }
             return;
         }
         if let Some(doc) = &u.document {
@@ -173,10 +206,15 @@ impl Inner {
     fn report_dest(&self, g: &Group) -> Option<i64> {
         let cfg = self.cfg.read().unwrap();
         if cfg.hosted.is_some() {
-            g.enabled_by.filter(|u| self.store.user_reachable(*u))
+            self.person_dest(g.enabled_by?)
         } else {
             cfg.chat_id
         }
+    }
+
+    /// Where this person's reports go: their Scan History group if they made one, otherwise their private chat with the bot.
+    pub(crate) fn person_dest(&self, user: i64) -> Option<i64> {
+        self.store.history_get(user).map(|h| h.0).or_else(|| Some(user).filter(|u| self.store.user_reachable(*u)))
     }
 
     fn post_report(&self, g: &Group, key: &str, body: String, urgent: bool) -> bool {
@@ -185,8 +223,79 @@ impl Inner {
             return false;
         };
         let title: String = g.title.chars().filter(|c| !c.is_control()).take(60).collect();
-        let text = format!("<b>Group:</b> {}\n{}", esc(&title), body);
+        let mut text = format!("<b>Group:</b> {}\n{}", esc(&title), body);
+        // Falling back to the private chat: remind them once per report where reports are meant to go.
+        if self.cfg.read().unwrap().hosted.is_some() && dest > 0 {
+            text += &format!("\n\n<i>Tip: make a group called {HISTORY_GROUP_NAME}, add me to it, and reports will go there instead.</i>");
+        }
         self.say(dest, None, &format!("r:{}:{key}", g.chat_id), "group_scan", text, urgent)
+    }
+
+    /// Everything that happens inside a group called "Scan History" (shared-bot mode).
+    fn on_history_group(&self, bot: &BotClient, u: &Incoming) {
+        let chat = u.chat_id;
+        let title = u.chat_title.as_deref().unwrap_or("");
+        if let Some(mc) = &u.member_change {
+            match mc.new_status.as_str() {
+                "left" | "kicked" => {
+                    if self.store.history_clear_chat(chat) > 0 {
+                        self.event("history_unlinked", "info", "The bot was removed from a Scan History group, so reports no longer go there.");
+                    }
+                }
+                // Added: the person who added the bot is the one these reports are for.
+                "member" | "administrator" => {
+                    if let Some(adder) = u.from_id {
+                        self.link_history(bot, chat, title, adder, u.update_id, true);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+        // Only an explicit /link in the group links it, so nobody claims a group by chatting in it.
+        let Some(text) = u.text.as_deref() else { return };
+        let cmd = text.split_whitespace().next().unwrap_or("").split('@').next().unwrap_or("").to_ascii_lowercase();
+        match cmd.as_str() {
+            "/link" if !u.anonymous_admin => {
+                if let Some(uid) = u.from_id {
+                    self.link_history(bot, chat, title, uid, u.update_id, false);
+                }
+            }
+            "/link" => {
+                let _ = self.say(chat, u.message_id, &format!("anon:{}", u.update_id), "group_reply", "I cannot tell who you are while you post anonymously. Turn off \"Remain anonymous\" and send /link again.".into(), false);
+            }
+            "/help" | "/start" | "/status" => {
+                if self.notice_due(chat, "history_help", Duration::from_secs(60)) {
+                    let _ = self.say(chat, u.message_id, &format!("hh:{}", u.update_id), "group_reply", format!("<b>SENTRIX {HISTORY_GROUP_NAME}</b>\nScan reports for the groups protected by the person who linked this group appear here. Everyone in this group can read them. To link it to you, send /link here."), false);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Make `chat` this person's Scan History group, but only if Telegram says they are in it.
+    fn link_history(&self, bot: &BotClient, chat: i64, title: &str, user: i64, update_id: i64, quiet_on_refusal: bool) {
+        let now = now_ms();
+        let member = bot.get_chat_member(chat, user).map(|m| m.is_member());
+        match member {
+            Ok(true) => {
+                if self.store.history_set(user, chat, title, now).is_ok() {
+                    self.event("history_linked", "info", "A Scan History group was linked to a person. Their scan reports now go there.");
+                    let _ = self.store.group_forget(chat); // it is a report room, not a protected group
+                    let _ = self.say(chat, None, &format!("linked:{chat}:{user}:{update_id}"), "group_notice", format!("<b>SENTRIX {HISTORY_GROUP_NAME}</b>\nReports for the groups this person protects will appear here. Everyone in this group can read them, so add only people who should."), false);
+                }
+            }
+            Ok(false) => {
+                if !quiet_on_refusal {
+                    let _ = self.say(chat, None, &format!("refused:{chat}:{update_id}"), "group_notice", "You are not a member of this group, so it cannot be your Scan History.".into(), false);
+                }
+            }
+            Err(_) => {
+                if !quiet_on_refusal {
+                    let _ = self.say(chat, None, &format!("refused:{chat}:{update_id}"), "group_notice", "I could not check who is in this group yet. Try /link again in a minute.".into(), false);
+                }
+            }
+        }
     }
 
     fn on_membership(&self, u: &Incoming, mc: &MemberChange) {
@@ -197,8 +306,9 @@ impl Inner {
                 let _ = self.store.group_joined(u.chat_id, u.chat_title.as_deref().unwrap_or(""), &u.chat_type, &mc.new_status, now);
                 if was_out {
                     self.event("group_joined", "info", "The SENTRIX bot was added to a group. Protection stays off until a group administrator sends /setup on.");
-                    if self.cfg.read().unwrap().group_shield {
-                        let hosted = self.cfg.read().unwrap().hosted.is_some();
+                    // Shared bot: the protected group stays completely quiet. People are told what to do in the bot's menu.
+                    if self.cfg.read().unwrap().group_shield && self.cfg.read().unwrap().hosted.is_none() {
+                        let hosted = false;
                         let blind = mc.new_status != "administrator" && self.store.kv_get("tg_privacy_blocking").as_deref() == Some("1");
                         let mut t = if hosted {
                             String::from("<b>SENTRIX</b> was added. It is <b>off</b> until a group administrator opens the SENTRIX bot in a private chat, presses Start and chooses Protect a group. Scan results are sent to that person privately, never posted here. Send /help for what it can and cannot see.")
@@ -276,12 +386,12 @@ impl Inner {
             "/report" => match self.require_admin(bot, u) {
                 Ok(uid) => {
                     // A summary is a report: it goes to the administrator's private chat, never into the group.
-                    let dest = if hosted { Some(uid).filter(|x| self.store.user_reachable(*x)) } else { self.cfg.read().unwrap().chat_id };
+                    let dest = if hosted { self.person_dest(uid) } else { self.cfg.read().unwrap().chat_id };
                     match dest {
                         Some(d) => {
                             let t = format!("<b>Group:</b> {}\n{}", esc(&g.title), self.report_text(g));
                             let _ = self.say(d, None, &format!("rpt:{}:{}", g.chat_id, u.update_id), "group_scan", t, false);
-                            reply("report", "The summary was sent to you privately.".into());
+                            reply("report", if hosted { "The summary was sent to your Scan History group (or to you privately if you have none).".into() } else { "The summary was sent to you privately.".into() });
                         }
                         None => reply("report", "Open the SENTRIX bot privately and press Start first. Reports are sent there, not here.".into()),
                     }

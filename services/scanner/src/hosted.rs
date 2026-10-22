@@ -111,6 +111,9 @@ impl Inner {
         let text = u.text.as_deref().unwrap_or("").trim();
         let cmd = text.split_whitespace().next().unwrap_or("").split('@').next().unwrap_or("").to_ascii_lowercase();
         match cmd.as_str() {
+            // The app opens the bot with `?start=account`, so the code is waiting the moment the person presses Start.
+            "/start" if text.split_whitespace().nth(1) == Some("account") => self.show_account(bot, me, uid),
+            "/start" if text.split_whitespace().nth(1) == Some("group") => self.show_group_steps(bot, me, uid),
             "/start" | "/menu" => self.show_welcome(bot, uid, first),
             "/help" => self.private_say(bot, uid, HOW_IT_WORKS, &[back()]),
             "/groups" | "/mine" => self.show_mine(bot, uid),
@@ -140,7 +143,7 @@ impl Inner {
         self.private_say(
             bot,
             uid,
-            "<b>Protect a group</b>\n1. Press <b>Choose a group</b> and pick the group. Telegram adds me to it. You must be an administrator of that group.\n2. I confirm here as soon as it is ready.\n\nI will check documents people post in the group (up to 20 MB). The results come only to you, in this chat, never into the group. Files are checked and deleted straight away.\n\nThe button works for 30 minutes.",
+            "<b>Protect a group</b>\n1. Make a new group called <b>Scan History</b> and add me to it. This is where the results will appear, so the group you protect stays quiet. You can add other people to it too: everyone in it can read the results.\n2. Press <b>Choose a group</b> below and pick the group to protect. Telegram adds me to it. You must be an administrator there.\n3. I confirm here as soon as it is ready.\n\nI check documents people post in the group (up to 20 MB) and delete them straight away. Until your Scan History group exists, results come to this chat.\n\nThe button works for 30 minutes.",
             &[vec![Button::url("Choose a group", &url)], back()],
         );
     }
@@ -164,6 +167,10 @@ impl Inner {
         let groups: Vec<Group> = self.store.groups_list().unwrap_or_default().into_iter().filter(|g| g.enabled_by == Some(uid) && g.left_at.is_none()).collect();
         let devices = self.store.devices_of(uid);
         let mut t = String::from("<b>Your protection</b>\n");
+        t += &match self.store.history_get(uid) {
+            Some((_, title)) => format!("Results go to your <b>{}</b> group.\n", safe_display_name(&title)),
+            None => "Results come to this chat. Make a group called <b>Scan History</b> and add me to it to receive them there.\n".to_string(),
+        };
         let mut rows: Vec<Vec<Button>> = vec![];
         t += "\n<b>Groups</b>\n";
         if groups.is_empty() {
@@ -272,13 +279,20 @@ impl Inner {
         self.event("group_linked", "info", "A group was linked to a person's private chat and protection was turned on.");
         let own = bot.get_chat_member(chat, me.id).ok();
         let blind = me.can_read_all_group_messages == Some(false) && !own.as_ref().is_some_and(|m| m.is_admin());
-        say("linked", "SENTRIX is now checking documents posted in this group (up to 20 MB). Results are sent privately to the administrator who set this up, not here. Send /help to see what it can and cannot check.".into());
         let title = safe_display_name(u.chat_title.as_deref().unwrap_or("your group"));
         let mut t = format!("<b>{title}</b> is now protected. Results will arrive here.");
         if blind {
             t += "\n\n<b>One more step.</b> Telegram is hiding the group's files from me. Make me an administrator of the group (no special rights needed) so I can see them.";
         }
-        let _ = self.store.enqueue_notification_to(&format!("linked:{chat}:{}", u.update_id), "hosted_notice", &t, now, Some(owner), None);
+        match self.store.history_get(owner) {
+            Some((h, _)) => {
+                let _ = self.store.enqueue_notification_to(&format!("linked:{chat}:{}", u.update_id), "hosted_notice", &t, now, Some(h), None);
+            }
+            None => {
+                let t2 = format!("{t}\n\nOne more thing: make a group called <b>Scan History</b> and add me to it. From then on, results go there instead of this chat.");
+                let _ = self.store.enqueue_notification_to(&format!("linked:{chat}:{}", u.update_id), "hosted_notice", &t2, now, Some(owner), None);
+            }
+        }
     }
 }
 

@@ -136,6 +136,21 @@ fn protect_my_account_gives_a_one_time_code_and_explains_that_the_login_stays_on
     r.svc.stop();
 }
 
+#[test]
+fn opening_the_bot_from_the_app_shows_the_code_immediately_without_a_menu_step() {
+    let r = rig();
+    r.mock.add_private_text(1, SAM, "/start account");
+    assert!(until(15, || r.mock.texts_in(SAM).iter().any(|t| t.contains("<code>"))), "{:?}", r.mock.texts_in(SAM));
+    let t = r.mock.texts_in(SAM)[0].clone();
+    assert!(t.contains("Protect my account") && t.contains("never reaches me"), "{t}");
+    let code = code_in(&t, "<code>", "</code>").replace('-', "");
+    assert_eq!(r.store.code_peek(CodeKind::Device, &code, now_ms()), Some(SAM));
+    assert!(r.store.user_reachable(SAM), "pressing Start through the link still registers the person");
+    r.mock.add_private_text(2, KIM, "/start group");
+    assert!(until(15, || !r.mock.last_urls(KIM).is_empty()), "the group link is shown straight away too");
+    r.svc.stop();
+}
+
 // ---- linking a group ---------------------------------------------------------------------------------------------
 
 #[test]
@@ -145,12 +160,14 @@ fn choosing_a_group_links_it_and_every_report_goes_to_the_persons_private_chat_n
     link(&r, SAM, A, &mut n);
     // The person is told in their private chat, and the group is told only that protection started.
     assert!(until(15, || r.mock.texts_in(SAM).iter().any(|t| t.contains("is now protected"))));
-    assert!(until(15, || r.mock.texts_in(A).iter().any(|t| t.contains("now checking documents"))));
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(r.mock.texts_in(A).is_empty(), "the protected group stays completely quiet: {:?}", r.mock.texts_in(A));
     // Someone in the group posts a file. No engine here, so the honest result is UNABLE TO VERIFY.
     r.mock.add_group_document(n, A, 50, MEMBER, "invoice.pdf", b"%PDF-1.4 hello".to_vec(), None);
     assert!(until(20, || r.mock.texts_in(SAM).iter().any(|t| t.contains("invoice.pdf"))), "the report must reach the person who protects the group");
     let msg = r.mock.texts_in(SAM).into_iter().find(|t| t.contains("invoice.pdf")).unwrap();
     assert!(msg.contains("Group:") && msg.contains("Design team"), "the private report says which group: {msg}");
+    assert!(msg.contains("Scan History"), "with no Scan History group yet, the report reminds the person to make one: {msg}");
     assert!(msg.contains("could not be fully checked") && !msg.to_lowercase().contains("no known threat"), "{msg}");
     std::thread::sleep(Duration::from_secs(2));
     assert!(!r.mock.texts_in(A).iter().any(|t| t.contains("invoice.pdf")), "the file and its result are never posted in the group");
@@ -212,6 +229,137 @@ fn an_administrator_who_never_pressed_start_cannot_switch_a_group_on_because_nob
     r.mock.add_group_text(1, A, 10, SAM, "/setup on");
     assert!(until(15, || r.mock.texts_in(A).iter().any(|t| t.contains("press Start first"))));
     assert!(r.store.group_get(A).unwrap().is_some_and(|g| !g.enabled), "nothing is scanned when no report could be delivered");
+    r.svc.stop();
+}
+
+#[test]
+fn a_file_in_a_group_where_protection_was_never_turned_on_is_not_checked_and_the_group_is_told_how_to_fix_it() {
+    let r = rig();
+    // Someone just added the bot to the group by hand. Nobody linked it.
+    r.mock.add_group(A, &[SAM], false, false);
+    r.mock.add_bot_joined(1, A, "Design team", SAM);
+    r.mock.add_group_document(2, A, 10, MEMBER, "invoice.pdf", b"%PDF-1.4".to_vec(), None);
+    assert!(until(15, || r.mock.texts_in(A).iter().any(|t| t.contains("protection is not on"))));
+    let t = r.mock.texts_in(A).into_iter().find(|t| t.contains("protection is not on")).unwrap();
+    assert!(t.contains("Protect a group") && !t.contains("invoice.pdf"), "it explains the fix and says nothing about the file: {t}");
+    assert_eq!(r.mock.called("getFile"), 0, "the file is not downloaded or checked");
+    // A second file within the hour does not repeat the notice.
+    r.mock.add_group_document(3, A, 11, MEMBER, "second.pdf", b"%PDF-1.4".to_vec(), None);
+    std::thread::sleep(Duration::from_secs(3));
+    assert_eq!(r.mock.texts_in(A).iter().filter(|t| t.contains("protection is not on")).count(), 1);
+    assert!(r.mock.texts_in(SAM).iter().all(|t| !t.contains("invoice.pdf")), "no report exists for a file that was not checked");
+    r.svc.stop();
+}
+
+// ---- the Scan History group ----------------------------------------------------------------------------------------
+
+const H: i64 = -1004444444444; // Sam's Scan History group
+const H2: i64 = -1005555555555; // Kim's
+
+fn make_history(r: &Rig, chat: i64, owner: i64, n: &mut i64) {
+    r.mock.add_group(chat, &[owner], false, false);
+    r.mock.add_bot_joined(*n, chat, "Scan History", owner);
+    *n += 1;
+    assert!(until(15, || r.store.history_get(owner).is_some_and(|h| h.0 == chat)), "adding the bot to a group called Scan History must link it automatically");
+}
+
+#[test]
+fn adding_the_bot_to_a_group_called_scan_history_links_it_automatically_and_it_is_never_protected_itself() {
+    let r = rig();
+    let mut n = 1;
+    make_history(&r, H, SAM, &mut n);
+    assert!(until(15, || r.mock.texts_in(H).iter().any(|t| t.contains("Reports for the groups this person protects"))));
+    assert!(r.mock.texts_in(H).iter().any(|t| t.contains("Everyone in this group can read them")), "the group is told that everyone in it sees the reports");
+    assert!(r.store.group_get(H).unwrap().is_none(), "a report room is not a protected group");
+    // A file posted there is not scanned.
+    r.mock.add_group_document(n, H, 5, MEMBER, "x.zip", b"PK".to_vec(), None);
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(r.mock.called("getFile"), 0);
+    r.svc.stop();
+}
+
+#[test]
+fn every_report_goes_to_the_scan_history_group_and_the_protected_group_stays_silent() {
+    let r = rig();
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    let history_msgs = r.mock.texts_in(H).len();
+    r.mock.add_group_document(n, A, 50, MEMBER, "invoice.pdf", b"%PDF-1.4 hello".to_vec(), None);
+    assert!(until(25, || r.mock.texts_in(H).iter().any(|t| t.contains("invoice.pdf"))), "the report must reach the Scan History group");
+    let msg = r.mock.texts_in(H).into_iter().find(|t| t.contains("invoice.pdf")).unwrap();
+    assert!(msg.contains("Group:") && msg.contains("Design team") && !msg.contains("Tip:"), "labelled with the group, and no reminder once a Scan History group exists: {msg}");
+    assert!(r.mock.texts_in(H).len() > history_msgs);
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(r.mock.texts_in(A).is_empty(), "the protected group never sees a scan, an alert or a notice: {:?}", r.mock.texts_in(A));
+    assert!(!r.mock.texts_in(SAM).iter().any(|t| t.contains("invoice.pdf")), "and it is not duplicated into the private chat");
+    r.svc.stop();
+}
+
+#[test]
+fn two_people_each_get_reports_only_in_their_own_scan_history_group() {
+    let r = rig();
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    link(&r, KIM, B, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    make_history(&r, H2, KIM, &mut n);
+    r.mock.add_group_document(n, A, 50, MEMBER, "sams-file.zip", b"PK".to_vec(), None);
+    r.mock.add_group_document(n + 1, B, 51, MEMBER, "kims-file.zip", b"PK".to_vec(), None);
+    assert!(until(30, || r.mock.texts_in(H).iter().any(|t| t.contains("sams-file.zip")) && r.mock.texts_in(H2).iter().any(|t| t.contains("kims-file.zip"))));
+    assert!(!r.mock.texts_in(H).iter().any(|t| t.contains("kims-file.zip")), "Kim's results never reach Sam's Scan History");
+    assert!(!r.mock.texts_in(H2).iter().any(|t| t.contains("sams-file.zip")), "Sam's results never reach Kim's Scan History");
+    r.svc.stop();
+}
+
+#[test]
+fn a_group_with_the_right_name_is_not_used_by_someone_who_is_not_in_it() {
+    let r = rig();
+    let mut n = 1;
+    r.mock.add_group(H, &[KIM], false, false);
+    r.mock.set_not_in_group(H, SAM);
+    // Sam claims a group Telegram says Sam is not in.
+    r.mock.add_group_text_titled(n, H, 5, SAM, "Scan History", "/link");
+    assert!(until(15, || r.mock.texts_in(H).iter().any(|t| t.contains("not a member"))));
+    assert!(r.store.history_get(SAM).is_none());
+    n += 1;
+    // Kim, who is in it, can link it with /link even if the bot was added before the name was set.
+    r.mock.add_group_text_titled(n, H, 6, KIM, "Scan History", "/link");
+    assert!(until(15, || r.store.history_get(KIM).is_some_and(|h| h.0 == H)));
+    assert!(r.store.history_get(SAM).is_none(), "linking for Kim does not link Sam");
+    r.svc.stop();
+}
+
+#[test]
+fn removing_or_renaming_the_scan_history_group_falls_back_to_the_private_chat_without_losing_reports() {
+    let r = rig();
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    // Renamed: the next thing said there no longer counts as a Scan History group.
+    r.mock.add_group_text_titled(n, H, 7, SAM, "Old reports", "hello");
+    n += 1;
+    assert!(until(15, || r.store.history_get(SAM).is_none()), "a renamed group stops receiving reports");
+    r.mock.add_group_document(n, A, 60, MEMBER, "late.zip", b"PK".to_vec(), None);
+    n += 1;
+    assert!(until(25, || r.mock.texts_in(SAM).iter().any(|t| t.contains("late.zip"))), "the report is not lost: it comes to the private chat");
+    assert!(!r.mock.texts_in(H).iter().any(|t| t.contains("late.zip")));
+    // Removing the bot from a real Scan History group clears it too.
+    make_history(&r, H2, SAM, &mut n);
+    r.mock.add_bot_removed(n, H2, "Scan History");
+    assert!(until(15, || r.store.history_get(SAM).is_none()));
+    r.svc.stop();
+}
+
+#[test]
+fn the_report_command_goes_to_the_scan_history_group_too() {
+    let r = rig();
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    r.mock.add_group_text(n, A, 30, SAM, "/report");
+    assert!(until(20, || r.mock.texts_in(H).iter().any(|t| t.contains("Security report"))), "{:?}", r.mock.texts_in(H));
+    assert!(!r.mock.texts_in(A).iter().any(|t| t.contains("Security report")), "never posted in the protected group");
     r.svc.stop();
 }
 

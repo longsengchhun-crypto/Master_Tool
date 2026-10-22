@@ -37,7 +37,7 @@ export function modes(t: TelegramStatus, engine: AppStatus['engine'] | undefined
   const gThreats = g.list.reduce((n, x) => n + x.stats.threats, 0);
   let group: Pick<Mode, 'word' | 'tone' | 'detail'>;
   if (!t.allowed || !g.allowed) group = { word: 'Off', tone: 'muted', detail: 'Your organization does not allow this.' };
-  else if (viaBot) group = { word: 'Set up in the bot', tone: 'muted', detail: 'Groups are added and managed in the SENTRIX bot. Open it and choose Protect a group. Results come to your chat with the bot.' };
+  else if (viaBot) group = { word: 'Set up in the bot', tone: 'muted', detail: 'Groups are added and managed in the SENTRIX bot. Open it and choose Protect a group. Results appear in your Scan History group.' };
   else if (!t.bot.configured) group = { word: 'Disconnected', tone: 'muted', detail: 'Connect your bot first. Group protection runs through it.' };
   else if (!g.shield) group = { word: 'Off', tone: 'muted', detail: 'Switch it on, add your bot to a group, then a group administrator sends /setup on.' };
   else if (!scannerOk) group = { word: 'Scanner unavailable', tone: 'danger', detail: 'Files in groups cannot be checked right now, and are never reported as safe.' };

@@ -49,6 +49,7 @@ export function Quarantine() {
   return (
     <div>
       <PageHeader
+        eyebrow="Review"
         title="Quarantine"
         subtitle="Locked away and unable to run. Restore a file only if you are sure it is safe."
         actions={
@@ -78,7 +79,7 @@ export function Quarantine() {
         {rows === null ? (
           <div className="p-8 text-sm text-muted">Loading…</div>
         ) : rows.length === 0 ? (
-          <Empty icon={<ShieldCheck className="size-6" />} title="Quarantine is empty">Files you quarantine appear here. They are locked and cannot run.</Empty>
+          <Empty art="vault" title="Nothing locked away">Files you quarantine appear here. They are locked and cannot run.</Empty>
         ) : (
           <table className="w-full text-left text-sm">
             <thead className="border-b border-line text-xs font-semibold text-muted">

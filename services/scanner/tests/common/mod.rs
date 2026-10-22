@@ -49,6 +49,8 @@ pub struct State {
     pub markup: Vec<Option<Value>>,
     /// Callback ids the bot answered.
     pub answered: Vec<String>,
+    /// (chat, user) pairs Telegram reports as not being in that group.
+    pub not_in_group: std::collections::HashSet<(i64, i64)>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -116,7 +118,11 @@ impl Mock {
 
     /// Any text a person sends the bot privately (they must have pressed Start for the bot to answer).
     pub fn add_private_text(&self, update_id: i64, user: i64, text: &str) {
-        self.state.lock().unwrap().updates.push(json!({"update_id": update_id, "message": {"message_id": update_id, "chat": {"id": user, "type": "private"}, "from": {"id": user, "first_name": "Sam"}, "text": text}}));
+        let mut s = self.state.lock().unwrap();
+        if text.starts_with("/start") {
+            s.users.insert(user); // sending /start is what lets a bot write to someone
+        }
+        s.updates.push(json!({"update_id": update_id, "message": {"message_id": update_id, "chat": {"id": user, "type": "private"}, "from": {"id": user, "first_name": "Sam"}, "text": text}}));
     }
 
     /// A person taps an inline button under one of the bot's messages.
@@ -174,6 +180,16 @@ impl Mock {
 
     pub fn add_group_text(&self, update_id: i64, chat: i64, message_id: i64, from: i64, text: &str) {
         self.state.lock().unwrap().updates.push(json!({"update_id": update_id, "message": {"message_id": message_id, "chat": {"id": chat, "type": "supergroup", "title": "Test group"}, "from": {"id": from}, "text": text}}));
+    }
+
+    /// A message in a group whose title is `title` (for example "Scan History").
+    pub fn add_group_text_titled(&self, update_id: i64, chat: i64, message_id: i64, from: i64, title: &str, text: &str) {
+        self.state.lock().unwrap().updates.push(json!({"update_id": update_id, "message": {"message_id": message_id, "chat": {"id": chat, "type": "supergroup", "title": title}, "from": {"id": from}, "text": text}}));
+    }
+
+    /// Telegram says this person is not in this group (never joined, or left).
+    pub fn set_not_in_group(&self, chat: i64, user: i64) {
+        self.state.lock().unwrap().not_in_group.insert((chat, user));
     }
 
     /// An administrator posting anonymously: the "sender" is the group itself.
@@ -298,6 +314,9 @@ fn handle(mut conn: TcpStream, state: Arc<Mutex<State>>) {
             let user = body["user_id"].as_i64().unwrap_or(0);
             let s = state.lock().unwrap();
             let Some(g) = s.groups.get(&chat) else { return json_resp(&mut conn, 400, json!({"ok": false, "error_code": 400, "description": "Bad Request: chat not found"})) };
+            if s.not_in_group.contains(&(chat, user)) {
+                return json_resp(&mut conn, 200, json!({"ok": true, "result": {"status": "left"}}));
+            }
             let r = if user == BOT_ID {
                 if g.bot_admin { json!({"status": "administrator", "can_delete_messages": g.bot_can_delete}) } else { json!({"status": "member"}) }
             } else if g.admins.contains(&user) {

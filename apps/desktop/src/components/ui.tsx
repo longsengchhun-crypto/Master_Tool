@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactNode } f
 import { ChevronRight, X, Loader2 } from 'lucide-react';
 import type { Verdict } from '../lib/types';
 import { VERDICT_LABEL } from '../lib/format';
+import { Art, type ArtName } from './Art';
 
 type BtnVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
@@ -13,7 +14,7 @@ export function Button({
   disabled,
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: BtnVariant; busy?: boolean }) {
-  const base = 'inline-flex h-9 select-none items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors disabled:pointer-events-none disabled:opacity-50';
+  const base = 'inline-flex h-9 select-none items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold transition-[background-color,transform] active:translate-y-px disabled:pointer-events-none disabled:opacity-50';
   const styles: Record<BtnVariant, string> = {
     primary: 'bg-accent text-accentink hover:bg-accenthover',
     secondary: 'border border-strong bg-solid text-ink hover:bg-surface2',
@@ -30,7 +31,7 @@ export function Button({
 
 export function Card({ children, className = '', ...rest }: { children: ReactNode; className?: string } & React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={`panel rounded-xl ${className}`} {...rest}>
+    <div className={`panel rounded-2xl ${className}`} {...rest}>
       {children}
     </div>
   );
@@ -39,9 +40,9 @@ export function Card({ children, className = '', ...rest }: { children: ReactNod
 /** A titled block: the standard way to group related facts on a page. */
 export function Section({ title, aside, children, className = '' }: { title: string; aside?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className={`panel rounded-xl ${className}`}>
+    <section className={`panel rounded-2xl ${className}`}>
       <header className="flex min-h-12 items-center justify-between gap-4 border-b border-line px-5">
-        <h2 className="text-sm font-semibold text-ink">{title}</h2>
+        <h2 className="font-display text-[0.95rem] font-semibold text-ink">{title}</h2>
         {aside}
       </header>
       {children}
@@ -146,22 +147,24 @@ export function Modal({ open, onClose, title, children, footer }: { open: boolea
   );
 }
 
-export function Empty({ icon, title, children }: { icon?: ReactNode; title: string; children?: ReactNode }) {
+export function Empty({ icon, art, title, children }: { icon?: ReactNode; art?: ArtName; title: string; children?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center px-6 py-14 text-center">
-      {icon && <div className="mb-3 text-faint">{icon}</div>}
-      <h3 className="text-sm font-semibold text-ink">{title}</h3>
+    <div className="flex flex-col items-center px-6 py-12 text-center">
+      {art && <Art name={art} className="mb-2" />}
+      {!art && icon && <div className="mb-3 text-faint">{icon}</div>}
+      <h3 className="font-display text-base font-semibold text-ink">{title}</h3>
       {children && <p className="mt-1 max-w-sm text-sm text-muted">{children}</p>}
     </div>
   );
 }
 
-export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
+export function PageHeader({ title, subtitle, eyebrow, actions }: { title: string; subtitle?: string; eyebrow?: string; actions?: ReactNode }) {
   return (
-    <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
+    <header className="mb-7 flex flex-wrap items-end justify-between gap-4 border-b border-line pb-5">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">{title}</h1>
-        {subtitle && <p className="mt-1 max-w-2xl text-sm text-muted">{subtitle}</p>}
+        {eyebrow && <p className="mb-1 text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-accent">{eyebrow}</p>}
+        <h1 className="font-display text-[2rem] font-semibold leading-tight text-ink">{title}</h1>
+        {subtitle && <p className="mt-1.5 max-w-2xl text-sm text-muted">{subtitle}</p>}
       </div>
       {actions && <div className="flex gap-2">{actions}</div>}
     </header>

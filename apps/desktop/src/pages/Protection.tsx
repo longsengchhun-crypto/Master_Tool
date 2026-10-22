@@ -115,7 +115,7 @@ export function Protection() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Protection" />
+      <PageHeader eyebrow="Protect" title="Protection" subtitle="What SENTRIX is watching, and whether every part of it is working." />
 
       {managed && <Notice tone="info">These settings are managed by {status.managedBy}. You can look but not change them.</Notice>}
       {rtOn && h && !running && <Notice tone="danger" title="Nothing is being watched">New files are not being scanned. {h.roots.length === 0 ? 'Pick a folder below.' : 'See the folders listed under Problems.'}</Notice>}

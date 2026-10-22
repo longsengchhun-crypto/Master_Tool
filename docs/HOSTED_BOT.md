@@ -13,10 +13,13 @@ posted in a group.
 
 1. **Start.** They open the bot and press Start. The bot answers with two buttons: **Protect a group** and
    **Protect my account** (plus *My protection* and *How it works*).
-2. **Protect a group.** The bot shows a button, **Choose a group**. It opens Telegram's own group picker, Telegram adds the bot
-   to the chosen group, and the bot confirms in the customer's private chat. The customer must be an administrator of that
-   group. From then on, documents posted in the group are checked and **the result goes to the customer's private chat,
-   labelled with the group's name**. The group itself only sees one line saying protection started.
+2. **Protect a group.** The customer makes a new group called **Scan History** and adds the bot to it (they can add other people
+   too: everyone in it can read the results). The bot recognises the name and links the group to the person who added it, after
+   Telegram confirms that person is a member. Then the customer presses **Choose a group** in the bot, which opens Telegram's
+   own group picker; Telegram adds the bot to the group to protect. The customer must be an administrator of that group. From
+   then on, documents posted in it are checked and **every result goes to that customer's Scan History group, labelled with the
+   protected group's name**. The protected group itself never sees a scan, an alert or a notice. Until a Scan History group
+   exists, results come to the customer's private chat with the bot, with a reminder to make one.
 3. **Protect my account.** Account protection runs in the SENTRIX desktop app on the customer's own computer, because that is
    where their Telegram login must stay. The bot gives a one-time code (`ABCD-EFGH`, valid 10 minutes, works once). The
    customer types it into the app (Telegram → Link). The app then sends the *text of each result* through the bot's relay to
@@ -42,8 +45,9 @@ A bot cannot add itself to a group; Telegram does not allow it. What SENTRIX use
 
 | Thing | Goes to | Notes |
 |---|---|---|
-| Group file scan result | The private chat of the person who protects the group | Never the group. Includes the group's name, file name, verdict, detection name |
-| `/report` in a group (administrators) | The administrator's private chat | Counts only |
+| Group file scan result | The Scan History group of the person who protects the group (their private chat with the bot until they make one) | Never the protected group. Includes the group's name, file name, verdict, detection name. **Everyone in Scan History can read it** |
+| `/report` in a group (administrators) | The same place | Counts only |
+| Scan History group | Linked by adding the bot to a group named exactly "Scan History" (any capitalisation), or `/link` in it | The adder must be a member (Telegram is asked). Renaming it, or removing the bot, unlinks it. One per person; two people never share routing |
 | App (account protection) result | The customer's private chat, via the relay | Text only: file name, verdict, time. Files stay on the customer's computer |
 | Group files | The bot's server, **in memory and a temporary folder, deleted right after the check** | Up to 20 MB, documents only. This is the one place customer files reach SENTRIX's server; the bot says so |
 
@@ -119,6 +123,7 @@ characters. Only the SHA-256 of a device token is stored.
   Telegram's documentation and a local test double.
 * A server that holds one bot for everyone is a single point of failure: when `sentrix-botd` is down, group protection stops and
   desktop reports queue on the customer's computer until it returns.
+* **Scan History is a normal group.** Everyone the customer adds sees every result, including file names. The bot says so when it links.
 * Group scanning means customers' group files reach this server (briefly). That needs to be in the privacy policy and terms.
 * Files over 20 MB, photos, videos and voice messages are not checked in groups (Telegram's bot limit and the product's scope).
 * Secret chats and content Telegram withholds from bots are not visible. No antivirus catches everything.

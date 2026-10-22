@@ -9,7 +9,7 @@ import type { NotifyPrefs, TelegramStatus } from '../lib/types';
 import { Button, Card, Disclosure, Modal, Notice, PageHeader, Pill, Tabs, Toggle, type TabTone } from '../components/ui';
 import { TelegramAccount } from './TelegramAccount';
 import { TelegramModes } from './TelegramModes';
-import { openLink, TelegramSetup } from './TelegramSetup';
+import { botLink, openLink, TelegramSetup } from './TelegramSetup';
 
 type Tab = 'account' | 'groups' | 'downloads' | 'reports';
 
@@ -202,7 +202,7 @@ export function Telegram() {
   if (!reportsReady && r.available) {
     return (
       <div className="space-y-5">
-        <PageHeader title="Telegram" subtitle="Connect SENTRIX to Telegram so results reach you, privately." />
+        <PageHeader eyebrow="Protect" title="Telegram" subtitle="Two minutes, once. After that, results simply arrive in your chat." />
         {!t.allowed && <Notice tone="info">Your organization does not allow Telegram on this device.</Notice>}
         <TelegramSetup t={t} busy={busy === 'relay'} onLink={linkToBot} />
         <Disclosure title="Use my own bot instead" hint="advanced">
@@ -219,7 +219,7 @@ export function Telegram() {
     // This build has no shared bot: the person brings their own.
     return (
       <div className="space-y-5">
-        <PageHeader title="Telegram" subtitle="Connect your own Telegram bot so results reach you." />
+        <PageHeader eyebrow="Protect" title="Telegram" subtitle="Connect your own Telegram bot so results reach you." />
         {!t.allowed && <Notice tone="info">Your organization does not allow Telegram on this device.</Notice>}
         <Notice tone="info" title="The SENTRIX bot is not set up in this copy of the app">
           Normally you would just open the SENTRIX bot and link it with a code. This copy does not know where the SENTRIX bot's relay is, so only your own bot can be used for now.
@@ -340,13 +340,13 @@ export function Telegram() {
       <h2 className="text-base font-semibold text-ink">Protect a group</h2>
       <p className="mt-1 max-w-2xl text-sm text-muted">Groups are set up in the SENTRIX bot, not in this app, and they keep working even when this computer is off.</p>
       <ol className="mt-4 space-y-2 text-sm text-muted">
-        <li><span className="font-semibold text-ink">1.</span> Open the bot and choose <span className="font-medium text-ink">Protect a group</span>.</li>
-        <li><span className="font-semibold text-ink">2.</span> Press <span className="font-medium text-ink">Choose a group</span> and pick it. Telegram adds the bot. You must be an administrator of that group.</li>
-        <li><span className="font-semibold text-ink">3.</span> The bot confirms in your chat. From then on, results for that group arrive there, never in the group itself.</li>
+        <li><span className="font-semibold text-ink">1.</span> Make a new group called <span className="font-medium text-ink">Scan History</span> and add the bot to it. Add anyone else who should see the results: everyone in that group can read them.</li>
+        <li><span className="font-semibold text-ink">2.</span> Open the bot, choose <span className="font-medium text-ink">Protect a group</span>, press <span className="font-medium text-ink">Choose a group</span> and pick the group to protect. You must be an administrator of it.</li>
+        <li><span className="font-semibold text-ink">3.</span> Done. The protected group stays quiet. Every result appears in Scan History.</li>
       </ol>
-      <div className="mt-4">{r.botLink && <Button variant="primary" onClick={() => void openLink(r.botLink!)}>Open the bot</Button>}</div>
+      <div className="mt-4">{r.botLink && <Button variant="primary" onClick={() => void openLink(botLink(r.botLink, 'group')!)}>Open the bot and add a group</Button>}</div>
       <div className="mt-5 grid gap-x-8 gap-y-1.5 border-t border-line pt-4 text-xs text-muted md:grid-cols-2">
-        <p>Send <span className="font-mono text-ink">/groups</span> to the bot to see, pause or remove your groups.</p>
+        <p>Send <span className="font-mono text-ink">/groups</span> to the bot to see, pause or remove your groups. Until Scan History exists, results come to your private chat with the bot.</p>
         <p>Documents up to 20 MB are checked. Photos, videos and bigger files are reported as not checked.</p>
         <p>Files from the group are checked on SENTRIX's server and deleted straight away. They are not kept.</p>
         <p>If Telegram hides a group's files from the bot, the bot tells you to make it an administrator there.</p>
@@ -411,7 +411,7 @@ export function Telegram() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Telegram" subtitle="Choose what SENTRIX watches. Results come to you in Telegram, privately." />
+      <PageHeader eyebrow="Protect" title="Telegram" subtitle="Choose what SENTRIX watches. Results come to you in Telegram, privately." />
       {!t.allowed && <Notice tone="info">Your organization does not allow Telegram on this device.</Notice>}
       {r.removedRemotely && <Notice tone="warn" title="This computer was unlinked in the bot">Results are not reaching you until you link it again.</Notice>}
 

@@ -7,6 +7,7 @@ import { ago, splitPath } from '../lib/format';
 import { usePolled } from '../lib/hooks';
 import type { ScanReport, Verdict } from '../lib/types';
 import { Button, Notice } from '../components/ui';
+import { Orb } from '../components/Orb';
 
 interface Item {
   key: string;
@@ -77,7 +78,6 @@ export function Home() {
     : lvl === 'protected'
       ? 'New files in your watched folders are scanned as they arrive. No scanner is perfect, so stay careful with files you do not know.'
       : (status.protection.reasons[0] ?? status.protection.headline);
-  const edge = danger.length || lvl === 'at_risk' ? 'border-danger' : lvl === 'attention' ? 'border-warn' : 'border-ok';
 
   const reportsLinked = !!t && (t.relay.linked || t.bot.configured);
   const watching = h ? h.roots.filter((r) => r.watching).length : null;
@@ -85,18 +85,21 @@ export function Home() {
 
   return (
     <div className="grid gap-x-10 gap-y-8 lg:grid-cols-[minmax(0,1fr)_17rem]">
-      <div className="min-w-0 space-y-8">
-        <header className={`border-l-4 ${edge} pl-5`}>
-          <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted">{today}</p>
-          <h1 className="mt-1.5 text-[1.7rem] font-semibold leading-tight tracking-tight text-ink">{headline}</h1>
-          <p className="mt-2 max-w-xl text-sm text-muted">{sub}</p>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Button variant="primary" onClick={pickFiles} disabled={scan.running}>
-              <FileSearch className="size-4" /> Scan files
-            </Button>
-            <Button variant="ghost" onClick={requestFullScan} disabled={scan.running}>
-              <HardDrive className="size-4" /> Scan the whole computer
-            </Button>
+      <div className="stagger min-w-0 space-y-8">
+        <header className="flex flex-wrap items-center gap-7 rounded-3xl border border-line bg-surface px-7 py-6 shadow-[var(--shadow)]">
+          <Orb level={lvl} scanning={scan.running} size={124} />
+          <div className="min-w-0 flex-1">
+            <p className="text-[0.7rem] font-semibold uppercase tracking-[0.16em] text-accent">{today}</p>
+            <h1 className="mt-1 font-display text-[2.1rem] font-semibold leading-[1.1] text-ink">{scan.running ? 'Checking your files now.' : headline}</h1>
+            <p className="mt-2 max-w-xl text-sm text-muted">{scan.running ? 'You can keep working. Results appear below as each file is checked.' : sub}</p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Button variant="primary" onClick={pickFiles} disabled={scan.running}>
+                <FileSearch className="size-4" /> Scan files
+              </Button>
+              <Button variant="ghost" onClick={requestFullScan} disabled={scan.running}>
+                <HardDrive className="size-4" /> Scan the whole computer
+              </Button>
+            </div>
           </div>
         </header>
 

@@ -1,7 +1,7 @@
 # SENTRIX Group Shield
 
-Group Shield checks files posted in Telegram **groups** and sends every result **privately** to the person who protects the
-group. **Nothing about a scan is ever posted in the group.** The group sees one line when protection starts, and the replies to
+Group Shield checks files posted in Telegram **groups** and sends every result to the **"Scan History" group** of the person who protects it
+(their private chat with the bot until they make one). **Nothing about a scan is ever posted in the group.** The group sees one line when protection starts, and the replies to
 commands people type there (`/status`, `/help`, ...).
 
 ## Two ways to run it
@@ -20,8 +20,9 @@ In both cases a group belongs to one person: the administrator who linked it. Re
 
 ## Setting it up
 
-**Shared bot:** press Start in the bot, choose **Protect a group**, press **Choose a group**, pick the group (you must be an
-administrator there). The bot confirms in your private chat. If Telegram hides the group's files from the bot ("has no access to
+**Shared bot:** make a group called **Scan History** and add the bot to it (this is where results appear; whoever you add there can
+read them). Then press Start in the bot, choose **Protect a group**, press **Choose a group**, pick the group (you must be an
+administrator there). The bot confirms in Scan History. The protected group stays quiet. If Telegram hides the group's files from the bot ("has no access to
 messages" in the member list), the bot tells you to make it a group administrator; the operator can also disable privacy mode
 once for all groups (see HOSTED_BOT.md).
 

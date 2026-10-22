@@ -148,6 +148,31 @@ impl JobStore {
         self.conn.lock().unwrap().execute("UPDATE relay_devices SET revoked_at=?3 WHERE id=?1 AND user_id=?2 AND revoked_at IS NULL", params![id, user_id, now]).map(|n| n > 0).unwrap_or(false)
     }
 
+    /// This person's reports now go to `chat`. Their private chat is the fallback when they have none.
+    pub fn history_set(&self, user_id: i64, chat_id: i64, title: &str, now: i64) -> Result<(), StoreError> {
+        let title: String = title.chars().filter(|c| !crate::telegram::is_deceptive(*c)).take(60).collect();
+        self.conn.lock().unwrap().execute(
+            "INSERT INTO user_history(user_id, chat_id, title, linked_at) VALUES (?1,?2,?3,?4)
+             ON CONFLICT(user_id) DO UPDATE SET chat_id=?2, title=?3, linked_at=?4",
+            params![user_id, chat_id, title, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn history_get(&self, user_id: i64) -> Option<(i64, String)> {
+        self.conn.lock().unwrap().query_row("SELECT chat_id, title FROM user_history WHERE user_id=?1", [user_id], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok().flatten()
+    }
+
+    /// Is this chat somebody's Scan History group?
+    pub fn history_chat_known(&self, chat_id: i64) -> bool {
+        self.conn.lock().unwrap().query_row("SELECT 1 FROM user_history WHERE chat_id=?1 LIMIT 1", [chat_id], |_| Ok(())).optional().ok().flatten().is_some()
+    }
+
+    /// The bot left, was removed, or the group was renamed: nobody's reports go there any more.
+    pub fn history_clear_chat(&self, chat_id: i64) -> usize {
+        self.conn.lock().unwrap().execute("DELETE FROM user_history WHERE chat_id=?1", [chat_id]).unwrap_or(0)
+    }
+
     pub fn hosted_totals(&self) -> HostedTotals {
         let c = self.conn.lock().unwrap();
         let n = |sql: &str| c.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap_or(0);
@@ -194,6 +219,21 @@ mod tests {
         assert!(s.device_by_token("secret-token").is_some());
         assert!(s.device_revoke(7, &id, 5));
         assert!(s.device_by_token("secret-token").is_none(), "an unlinked app is refused");
+    }
+
+    #[test]
+    fn each_person_has_their_own_history_group_and_losing_it_clears_only_that() {
+        let s = JobStore::open_in_memory().unwrap();
+        assert!(s.history_get(7).is_none());
+        s.history_set(7, -100, "Scan History", 1).unwrap();
+        s.history_set(8, -200, "Scan History", 1).unwrap();
+        assert_eq!(s.history_get(7).unwrap().0, -100);
+        assert_eq!(s.history_get(8).unwrap().0, -200, "another person's is separate");
+        assert!(s.history_chat_known(-100) && !s.history_chat_known(-300));
+        s.history_set(7, -150, "Scan History", 2).unwrap();
+        assert_eq!(s.history_get(7).unwrap().0, -150, "a person has one, the newest");
+        assert_eq!(s.history_clear_chat(-200), 1);
+        assert!(s.history_get(8).is_none() && s.history_get(7).is_some());
     }
 
     #[test]

@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FilePlus2, FolderSearch, UploadCloud } from 'lucide-react';
+import { FilePlus2, FolderSearch } from 'lucide-react';
 import { api } from '../lib/api';
 import { useApp } from '../lib/app';
 import { needsAttention, splitPath } from '../lib/format';
 import type { ScanReport } from '../lib/types';
 import { Button, Card, Notice, PageHeader, VerdictBadge } from '../components/ui';
 import { ReportView } from '../components/ReportView';
+import { Art } from '../components/Art';
 
 export function Scan() {
   const { scan, startScan, requestFullScan, cancelScan, status } = useApp();
@@ -31,7 +32,7 @@ export function Scan() {
 
   return (
     <div>
-      <PageHeader title="Scan" subtitle="Files are inspected where they are and never run. Nothing is uploaded." />
+      <PageHeader eyebrow="Check a file" title="Scan" subtitle="Anything you are unsure about: a download, a USB stick, an attachment. It is inspected where it is, never run, never uploaded." />
 
       {engineDown && (
         <div className="mb-4">
@@ -42,18 +43,20 @@ export function Scan() {
       )}
 
       {!scan.running && (
-        <Card className="mb-5 grid place-items-center border-dashed border-strong px-8 py-10 text-center" aria-label="Drop zone">
-          <UploadCloud className="mb-3 size-7 text-faint" strokeWidth={1.5} aria-hidden />
-          <h2 className="text-sm font-semibold text-ink">Drop files or folders anywhere in this window</h2>
-          <p className="mt-1 max-w-md text-sm text-muted">The file type comes from the content, not the name. Archives (ZIP, JAR, APK, Office) are opened in memory, never extracted to disk.</p>
-          <div className="mt-5 flex flex-wrap justify-center gap-2">
-            <Button variant="primary" onClick={chooseFiles}>
-              <FilePlus2 className="size-4" /> Choose files
-            </Button>
-            <Button onClick={chooseFolder}>
-              <FolderSearch className="size-4" /> Choose a folder
-            </Button>
-            <Button onClick={requestFullScan}>Full system scan</Button>
+        <Card className="dropzone mb-5 flex flex-wrap items-center gap-8 border-2 border-dashed border-strong px-9 py-9" aria-label="Drop zone">
+          <Art name="inbox" className="shrink-0" />
+          <div className="min-w-0 flex-1">
+            <h2 className="font-display text-xl font-semibold text-ink">Drop it here</h2>
+            <p className="mt-1 max-w-md text-sm text-muted">Drag files or folders anywhere onto this window. The type is read from the content, not the name, and archives are opened in memory, never unpacked onto your disk.</p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Button variant="primary" onClick={chooseFiles}>
+                <FilePlus2 className="size-4" /> Choose files
+              </Button>
+              <Button onClick={chooseFolder}>
+                <FolderSearch className="size-4" /> Choose a folder
+              </Button>
+              <Button variant="ghost" onClick={requestFullScan}>Scan the whole computer</Button>
+            </div>
           </div>
         </Card>
       )}

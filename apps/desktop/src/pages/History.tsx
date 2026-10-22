@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FileText, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { api } from '../lib/api';
 import { useApp } from '../lib/app';
 import { ago, splitPath } from '../lib/format';
@@ -36,7 +36,7 @@ export function History() {
 
   return (
     <div>
-      <PageHeader title="History" />
+      <PageHeader eyebrow="Review" title="History" subtitle="Everything SENTRIX has checked, newest first. Open one to see exactly what was looked at." />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
         <Card className="overflow-hidden">
           <div className="space-y-2 border-b border-line p-3">
@@ -57,7 +57,7 @@ export function History() {
             {rows === null && <li className="p-5 text-sm text-muted">Loading…</li>}
             {rows && shown.length === 0 && (
               <li>
-                <Empty icon={<FileText className="size-6" />} title={rows.length ? 'Nothing here' : 'No scans yet'}>
+                <Empty art={rows.length ? 'search' : 'inbox'} title={rows.length ? 'Nothing matches' : 'Nothing checked yet'}>
                   {rows.length ? 'Try another filter or search.' : 'Results appear here after you scan a file.'}
                 </Empty>
               </li>
@@ -79,7 +79,7 @@ export function History() {
           </ul>
         </Card>
         <Card className="p-6">
-          {selected ? <ReportView key={selected.id} report={selected} onChanged={load} /> : <Empty icon={<FileText className="size-6" />} title="Pick a scan">Its full result appears here.</Empty>}
+          {selected ? <ReportView key={selected.id} report={selected} onChanged={load} /> : <Empty art="search" title="Pick a result">Choose one on the left to see what was checked and what was found.</Empty>}
         </Card>
       </div>
     </div>

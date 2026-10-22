@@ -9,16 +9,16 @@
  */
 :root {
   color-scheme: light;
-  --bg: #f5f7fa;
-  --bg-elev: #ffffff;
-  --surface: #ffffff;
-  --surface-solid: #ffffff;
-  --surface-2: #eef2f6;
-  --line: #e1e7ee;
-  --line-strong: #c5cfdb;
-  --text: #14202e;
-  --muted: #55627a;
-  --faint: #5f6b7e;
+  --bg: #f3efe6;
+  --bg-elev: #faf7f0;
+  --surface: #fdfbf6;
+  --surface-solid: #fdfbf6;
+  --surface-2: #ece6d9;
+  --line: #e0d8c7;
+  --line-strong: #c4b8a0;
+  --text: #1a2330;
+  --muted: #566070;
+  --faint: #5d6573;
   --accent: #0b7285;
   --accent-hover: #095b6b;
   --accent-ink: #ffffff;
@@ -26,12 +26,12 @@
   --warn: #9a5b00;
   --danger: #b42318;
   --info: #1d5fd1;
-  --ok-bg: #e5f4ec;
-  --warn-bg: #fcefd6;
-  --danger-bg: #fce8e6;
-  --info-bg: #e6eefc;
-  --select: #e6f3f6;
-  --shadow: 0 1px 2px rgba(20, 32, 46, 0.05), 0 4px 14px -6px rgba(20, 32, 46, 0.10);
+  --ok-bg: #e3f0e4;
+  --warn-bg: #f8ecd0;
+  --danger-bg: #f9e2dc;
+  --info-bg: #e3eaf6;
+  --select: #e1ede9;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 10px 28px -20px rgba(70, 52, 20, 0.35);
 }
 
 [data-theme='dark'] {
@@ -58,7 +58,7 @@
   --danger-bg: #3f1d1b;
   --info-bg: #172846;
   --select: #12303a;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px -8px rgba(0, 0, 0, 0.6);
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 30px -22px rgba(0, 0, 0, 0.9);
 }
 
 :root {
@@ -73,6 +73,7 @@
 
 @theme inline {
   --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Bricolage Grotesque Variable', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'Cascadia Mono', Consolas, ui-monospace, monospace;
   --color-bg: var(--bg);
   --color-elev: var(--bg-elev);
@@ -178,4 +179,50 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* ---- character ---------------------------------------------------------------------------------------------- */
+
+/* Headlines use the display face; numbers line up. */
+.font-display {
+  font-family: var(--font-display);
+  font-variation-settings: 'opsz' 48;
+  letter-spacing: -0.02em;
+}
+
+/* Lists and sections arrive one after another instead of all at once. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.stagger > * {
+  animation: rise 0.42s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.stagger > *:nth-child(2) { animation-delay: 60ms; }
+.stagger > *:nth-child(3) { animation-delay: 120ms; }
+.stagger > *:nth-child(4) { animation-delay: 180ms; }
+.stagger > *:nth-child(5) { animation-delay: 240ms; }
+.stagger > *:nth-child(6) { animation-delay: 300ms; }
+.stagger > *:nth-child(n + 7) { animation-delay: 360ms; }
+
+/* The status orb: a slow breath when all is well, a turning arc while a scan runs. */
+@keyframes orb-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.55; }
+  50% { transform: scale(1.07); opacity: 0.9; }
+}
+@keyframes orb-turn {
+  to { transform: rotate(360deg); }
+}
+.orb-breathe { animation: orb-breathe 3.6s ease-in-out infinite; transform-origin: center; }
+.orb-turn { animation: orb-turn 2.4s linear infinite; transform-origin: center; }
+
+/* A drop target that responds to a file being dragged over it. */
+.dropzone {
+  background-image: repeating-linear-gradient(135deg, transparent 0 14px, color-mix(in srgb, var(--line) 55%, transparent) 14px 15px);
 }

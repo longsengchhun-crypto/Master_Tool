@@ -39,14 +39,14 @@ if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
 # Telegram API credentials identify this application to Telegram (they do not grant access to any account). They are
 # compiled into the build from the environment or from the gitignored dev file, and are never committed.
 if (-not $env:SENTRIX_TG_API_ID -or -not $env:SENTRIX_TG_API_HASH) {
-  $dev = Join-Path $root '.sentrix-dev	elegram-api.env'
+  $dev = Join-Path $root '.sentrix-dev\telegram-api.env'
   if (Test-Path $dev) {
     foreach ($l in Get-Content $dev) { if ($l -match '^\s*(SENTRIX_TG_API_(ID|HASH))=(.+)$') { Set-Item "env:$($Matches[1])" $Matches[3].Trim() } }
   }
 }
 # The shared SENTRIX bot: where its relay is and what the bot is called (public values).
 if (-not $env:SENTRIX_RELAY_URL -or -not $env:SENTRIX_BOT_USERNAME) {
-  $botenv = Join-Path $root '.sentrix-devot.env'
+  $botenv = Join-Path $root '.sentrix-dev\bot.env'
   if (Test-Path $botenv) {
     foreach ($l in Get-Content $botenv) { if ($l -match '^\s*(SENTRIX_RELAY_URL|SENTRIX_BOT_USERNAME)=(.+)$') { Set-Item "env:$($Matches[1])" $Matches[2].Trim() } }
   }

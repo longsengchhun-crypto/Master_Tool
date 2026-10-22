@@ -191,6 +191,10 @@ CREATE TABLE IF NOT EXISTS relay_devices(
   created_at INTEGER NOT NULL, last_seen_at INTEGER, revoked_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS relay_devices_user ON relay_devices(user_id);
+-- The group a person made, named "Scan History", where the bot posts the reports of the groups that person protects.
+CREATE TABLE IF NOT EXISTS user_history(
+  user_id INTEGER PRIMARY KEY, chat_id INTEGER NOT NULL, title TEXT NOT NULL DEFAULT '', linked_at INTEGER NOT NULL
+);
 "#;
 
 /// Columns added after the first release. Existing databases are upgraded in place.

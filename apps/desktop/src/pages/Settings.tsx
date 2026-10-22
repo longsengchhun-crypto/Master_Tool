@@ -66,7 +66,7 @@ export function Settings() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Settings" />
+      <PageHeader eyebrow="App" title="Settings" subtitle="How SENTRIX looks, starts and what it keeps." />
 
       <Card className="divide-y divide-line px-5 py-1">
         <div className="flex items-center justify-between gap-6 py-3">
@@ -99,7 +99,7 @@ export function Settings() {
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted">
           <li>Files are scanned on this computer and never uploaded.</li>
           <li>The only download is malware definitions from ClamAV, which says nothing about your files.</li>
-          <li>If you connect a Telegram bot, report text (file name, result) goes to Telegram. Nothing else leaves this computer.</li>
+          <li>If you link Telegram, the text of each result (file name, verdict, time) goes to your private chat with the SENTRIX bot. If you ask the bot to protect a group, files posted in that group are checked on SENTRIX&apos;s server and deleted straight away, and the results go to your Scan History group, which everyone you add to it can read. Nothing else leaves this computer.</li>
         </ul>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <Button variant="danger" onClick={() => setConfirmClear(true)}>Clear scan history</Button>
