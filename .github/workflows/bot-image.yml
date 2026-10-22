@@ -1,0 +1,47 @@
+# Builds the bot service on Linux, runs its tests there, and publishes the container image that servers run.
+name: bot-image
+on:
+  push:
+    branches: [main]
+    paths: ["services/**", "Cargo.toml", "Cargo.lock", "deploy/**", ".github/workflows/bot-image.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Engine for the tests that scan real files
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clamav-daemon clamav-freshclam
+      - name: Unit and bot tests
+        run: cargo test -p sentrix-core --locked --lib --test hosted --test groups --test service
+
+  image:
+    needs: linux-tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/sentrix-bot:latest
+            ghcr.io/${{ github.repository_owner }}/sentrix-bot:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

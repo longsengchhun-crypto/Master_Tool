@@ -1,0 +1,17 @@
+.git
+node_modules
+target
+dist-release
+third_party
+.sentrix-dev
+apps/admin
+apps/desktop/node_modules
+apps/desktop/dist
+apps/desktop/src
+packages
+tests
+infrastructure
+docs
+*.key
+.env
+.env.*

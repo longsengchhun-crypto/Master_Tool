@@ -1,0 +1,47 @@
+# SENTRIX bot on an always-on server. Use deploy/install.sh, or by hand:
+#   1. copy .env.example to .env and fill in SENTRIX_BOT_TOKEN
+#   2. docker compose up -d                    (bot + automatic updates)
+#   3. docker compose --profile https up -d    (also HTTPS for the desktop app link; needs DOMAIN in .env)
+name: sentrix
+services:
+  bot:
+    image: ghcr.io/longsengchhun-crypto/sentrix-bot:latest
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - botdata:/data
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+    healthcheck:
+      # The relay answers only while the program is alive.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8787' || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 600s
+
+  # Pulls a new bot image by itself when one is published, so the bot is always the newest version.
+  watchtower:
+    image: nickfedor/watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --label-enable --cleanup --interval 600
+
+  # HTTPS in front of the relay (only with --profile https). Caddy gets and renews the certificate by itself.
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+
+volumes:
+  botdata:
+  caddydata:

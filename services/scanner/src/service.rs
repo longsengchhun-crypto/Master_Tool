@@ -39,6 +39,12 @@ pub struct WatchRoot {
 pub const DOC_WORKERS: usize = 3;
 pub const DOC_QUEUE: usize = 64;
 
+/// How many files are checked at the same time. A PC needs few; a server with many cores can check many (SENTRIX_DOC_WORKERS
+/// overrides). The scan engine's own thread count follows it (see clamav.rs).
+pub fn doc_workers() -> usize {
+    std::env::var("SENTRIX_DOC_WORKERS").ok().and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(DOC_WORKERS)).clamp(DOC_WORKERS, 32)
+}
+
 #[derive(Clone)]
 pub struct ServiceConfig {
     pub realtime: bool,
@@ -615,10 +621,11 @@ impl ProtectionService {
         let spawn = |name: &str, f: Box<dyn FnOnce() + Send>| std::thread::Builder::new().name(name.into()).spawn(f).expect("thread");
 
         // The document pool (see `Inner::docs`).
-        let (doc_tx, doc_rx) = std::sync::mpsc::sync_channel::<crate::group::DocJob>(DOC_QUEUE);
+        let workers = doc_workers();
+        let (doc_tx, doc_rx) = std::sync::mpsc::sync_channel::<crate::group::DocJob>(DOC_QUEUE.max(workers * 24));
         *inner.docs.lock().unwrap() = Some(doc_tx);
         let doc_rx = Arc::new(Mutex::new(doc_rx));
-        for i in 0..DOC_WORKERS {
+        for i in 0..workers {
             let (me, rx) = (inner.clone(), doc_rx.clone());
             th.push(spawn(&format!("sentrix-docs-{i}"), Box::new(move || {
                 while !me.stop.load(Ordering::Relaxed) {

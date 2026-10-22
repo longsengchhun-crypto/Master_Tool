@@ -144,10 +144,12 @@ impl ClamEngine {
         // Pick a free loopback port; clamd listens on 127.0.0.1 only.
         let port = TcpListener::bind("127.0.0.1:0").map_err(|e| ClamError::StartFailed(e.to_string()))?.local_addr()?.port();
         let conf = self.data_dir.join("clamd.conf");
+        // A PC runs 4 scan threads; a server sets more (SENTRIX_CLAMD_THREADS, which sentrix-botd sets from its core count).
+        let threads = std::env::var("SENTRIX_CLAMD_THREADS").ok().and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(4).clamp(1, 64);
         std::fs::write(
             &conf,
             format!(
-                "DatabaseDirectory {}\nTCPSocket {port}\nTCPAddr 127.0.0.1\nForeground yes\nMaxThreads 4\nStreamMaxLength 512M\nMaxFileSize 512M\nMaxScanSize 1024M\nMaxRecursion 16\nMaxFiles 20000\nAlertEncrypted yes\nAlertExceedsMax yes\nLogTime yes\n{}",
+                "DatabaseDirectory {}\nTCPSocket {port}\nTCPAddr 127.0.0.1\nForeground yes\nMaxThreads {threads}\nStreamMaxLength 512M\nMaxFileSize 512M\nMaxScanSize 1024M\nMaxRecursion 16\nMaxFiles 20000\nAlertEncrypted yes\nAlertExceedsMax yes\nLogTime yes\n{}",
                 conf_path(&self.db_dir()),
                 // Operator tuning without a rebuild: extra clamd.conf lines separated by ';' (read from the environment only).
                 std::env::var("SENTRIX_CLAMD_EXTRA").map(|e| e.split(';').map(|l| format!("{}\n", l.trim())).collect::<String>()).unwrap_or_default()

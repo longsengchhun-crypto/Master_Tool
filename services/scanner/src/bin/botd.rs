@@ -152,8 +152,20 @@ fn main() {
     let quarantine = Arc::new(Quarantine::open(data_dir.join("vault")).unwrap_or_else(|e| die(&format!("quarantine: {e}"))));
 
     // The scan engine. Without it nothing can be checked, and every file is reported "not checked", never clean.
+    if std::env::var_os("SENTRIX_CLAMD_THREADS").is_none() {
+        std::env::set_var("SENTRIX_CLAMD_THREADS", sentrix_core::service::doc_workers().to_string());
+    }
+    println!("[botd] checking up to {} files at once", sentrix_core::service::doc_workers());
     let clam = std::env::var_os("SENTRIX_CLAMAV_DIR").map(|d| Arc::new(ClamEngine::new(PathBuf::from(d), data_dir.clone())));
     if let Some(c) = &clam {
+        // A fresh server has no signatures yet: fetch them before starting (the first download takes a few minutes).
+        if c.is_installed() && !c.has_database() {
+            println!("[botd] downloading malware signatures for the first time...");
+            match c.update_signatures() {
+                Ok(_) => println!("[botd] signatures downloaded"),
+                Err(e) => println!("[botd] WARNING: could not download signatures ({e})"),
+            }
+        }
         if c.is_installed() && c.has_database() {
             match c.start() {
                 Ok(()) => println!("[botd] scan engine running"),
