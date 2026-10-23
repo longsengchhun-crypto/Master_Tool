@@ -40,7 +40,7 @@ aho-corasick = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 # Telegram Bot API client (HTTPS).
 ureq = { version = "3", features = ["json"] }
-base64 = "0.22"
+base64 = "0.23"
 libloading = { version = "0.8", default-features = false }
 qrcode = { version = "0.14", default-features = false }
 tiny_http = "0.12"
