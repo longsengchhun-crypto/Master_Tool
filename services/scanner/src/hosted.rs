@@ -64,7 +64,7 @@ fn back() -> Vec<Button> {
     vec![Button::callback("Back to menu", "m:main")]
 }
 
-const HOW_IT_WORKS: &str = "<b>How SENTRIX works</b>\nI check files for malware and tell you what I find, here, privately.\n\n<b>Groups.</b> You add me to as many groups as you like, as long as you are in them. I check documents people post there (up to 20 MB). The results go to your <b>Scan History</b> group(s), never into the protected group. Files are checked and deleted straight away.\n\n<b>Your account.</b> The SENTRIX app on your own computer checks files that reach your Telegram account. Your Telegram login stays on your computer. The app sends me only the result to pass on to you.\n\n<b>Limits.</b> I cannot see secret chats, photos and videos are not checked, and files over 20 MB in groups are not checked. \"Not checked\" never means safe. No antivirus catches everything.";
+const HOW_IT_WORKS: &str = "<b>How SENTRIX works</b>\nI check files for malware and tell you what I find, here, privately.\n\n<b>The app comes first.</b> I only work for people who have the SENTRIX app installed and linked to me. Without it I do not check anything, for groups or for your account. Keep the app installed: if it is not seen for 14 days, protection pauses until you open it again.\n\n<b>Groups.</b> You add me to as many groups as you like, as long as you are in them. I check documents people post there (up to 20 MB). The results go to your <b>Scan History</b> group(s), never into the protected group. Files are checked and deleted straight away.\n\n<b>Your account.</b> The SENTRIX app on your own computer checks files that reach your Telegram account. Your Telegram login stays on your computer. The app sends me only the result to pass on to you.\n\n<b>Limits.</b> I cannot see secret chats, photos and videos are not checked, and files over 20 MB in groups are not checked. \"Not checked\" never means safe. No antivirus catches everything.";
 
 impl Inner {
     fn hosted_download_url(&self) -> String {
@@ -119,6 +119,9 @@ impl Inner {
             "/groups" | "/mine" => self.show_mine(bot, uid),
             "/account" => self.show_account(bot, me, uid),
             _ => {
+                if self.need_app(bot, uid) {
+                    return;
+                }
                 let hint = if u.document.is_some() || u.other_media { "I check files in groups you protect and in your SENTRIX app, not files sent here. Choose what to protect:" } else { "Choose what to protect:" };
                 self.private_say(bot, uid, hint, &main_menu());
             }
@@ -128,10 +131,43 @@ impl Inner {
     fn show_welcome(&self, bot: &BotClient, uid: i64, first: &str) {
         let name: String = first.chars().filter(|c| !c.is_control()).take(40).collect();
         let hello = if name.trim().is_empty() { "<b>Welcome.</b>".to_string() } else { format!("<b>Welcome, {}.</b>", safe_display_name(&name)) };
+        if !self.store.app_active(uid, now_ms()) {
+            return self.show_app_required(bot, uid, &hello);
+        }
         self.private_say(bot, uid, &format!("{hello}\nI am SENTRIX. I check files for malware and tell you what I find, here, privately.\n\nWhat do you want to protect?"), &main_menu());
     }
 
+    /// Everything the bot does needs the SENTRIX app on the person's computer. If this person has none that is linked and
+    /// recently seen, say so (with the download and a code to link it) and return `true`; the caller must stop.
+    fn need_app(&self, bot: &BotClient, uid: i64) -> bool {
+        if self.store.app_active(uid, now_ms()) {
+            return false;
+        }
+        self.show_app_required(bot, uid, "");
+        true
+    }
+
+    /// The only thing a person without the app can do here: get it, and link it with a one-time code.
+    fn show_app_required(&self, bot: &BotClient, uid: i64, hello: &str) {
+        let code = new_device_code();
+        if self.store.code_issue(CodeKind::Device, uid, &code, now_ms() + DEVICE_CODE_TTL_MS).is_err() {
+            return self.private_say(bot, uid, "Something went wrong on my side. Please try again.", &[]);
+        }
+        let url = self.hosted_download_url();
+        let get = if url.is_empty() { "1. Get the SENTRIX app from the person who gave you this bot.".to_string() } else { format!("1. Download and install the SENTRIX app: {}", esc(&url)) };
+        let lead = if hello.is_empty() { String::new() } else { format!("{hello}\nI am SENTRIX. I check files for malware and tell you what I find, here, privately.\n\n") };
+        self.private_say(
+            bot,
+            uid,
+            &format!("{lead}<b>Install the SENTRIX app first.</b> I work only for people who use the SENTRIX app, so until it is installed and linked to me I cannot check anything for you, not groups and not your account. Your Telegram login stays on your computer and never reaches me.\n\n{get}\n2. In the app open <b>Telegram</b>, then <b>Your account</b>, and choose <b>Link to the bot</b>.\n3. Enter this code:\n\n<code>{}</code>\n\nThe code works once and for 10 minutes. As soon as the app is linked I unlock everything here.", show_device_code(&code)),
+            &[vec![Button::callback("Get a new code", "m:account")], vec![Button::callback("How it works", "m:help")]],
+        );
+    }
+
     fn show_group_steps(&self, bot: &BotClient, me: &BotInfo, uid: i64) {
+        if self.need_app(bot, uid) {
+            return;
+        }
         let Some(username) = me.username.as_deref() else {
             return self.private_say(bot, uid, "I cannot make the group link right now. Please try again later.", &[back()]);
         };
@@ -149,6 +185,9 @@ impl Inner {
     }
 
     fn show_account(&self, bot: &BotClient, _me: &BotInfo, uid: i64) {
+        if !self.store.app_active(uid, now_ms()) {
+            return self.show_app_required(bot, uid, "");
+        }
         let code = new_device_code();
         if self.store.code_issue(CodeKind::Device, uid, &code, now_ms() + DEVICE_CODE_TTL_MS).is_err() {
             return self.private_say(bot, uid, "Something went wrong on my side. Please try again.", &[back()]);
@@ -233,6 +272,11 @@ impl Inner {
         let now = now_ms();
         let mut note: Option<&str> = None;
         let parts: Vec<&str> = cb.data.split(':').collect();
+        // Switching protection on, or changing where reports go, needs the app. Pausing, removing and unlinking never do.
+        if matches!(parts.as_slice(), ["g", "on", _] | ["r", ..]) && self.need_app(bot, uid) {
+            let _ = bot.answer_callback(&cb.id, None);
+            return;
+        }
         match parts.as_slice() {
             ["m", "main"] => self.show_welcome(bot, uid, ""),
             ["m", "group"] => self.show_group_steps(bot, me, uid),
@@ -334,6 +378,10 @@ impl Inner {
         };
         if u.from_id != Some(owner) {
             return say("who", "This link was made for someone else. Open the SENTRIX bot privately and make your own.".into());
+        }
+        // The code is not used up, so the same link works once the app is linked (within its 30 minutes).
+        if !self.store.app_active(owner, now) {
+            return say("app", "I cannot protect this group yet: the SENTRIX app must be installed and linked first. Open the SENTRIX bot privately for the download and your link code, then use the link again.".into());
         }
         // Any member of the group can set up protection, not only administrators. Telegram, not the message, says who is in it.
         match bot.get_chat_member(chat, owner) {

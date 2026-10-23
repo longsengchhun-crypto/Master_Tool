@@ -155,6 +155,23 @@ impl Mock {
         m["inline_keyboard"].as_array().map(|rows| rows.iter().flat_map(|r| r.as_array().cloned().unwrap_or_default()).filter_map(|b| b["url"].as_str().map(String::from)).collect()).unwrap_or_default()
     }
 
+    /// Every link button on every message sent to `chat`, oldest first. For tests that must not depend on which message
+    /// happens to be the very last one (a notice can land after the message they are waiting for).
+    pub fn all_urls(&self, chat: i64) -> Vec<String> {
+        let s = self.state.lock().unwrap();
+        let mut out = vec![];
+        for (i, (c, _)) in s.sent.iter().enumerate() {
+            if *c != chat {
+                continue;
+            }
+            let Some(m) = s.markup.get(i).and_then(|m| m.clone()) else { continue };
+            if let Some(rows) = m["inline_keyboard"].as_array() {
+                out.extend(rows.iter().flat_map(|r| r.as_array().cloned().unwrap_or_default()).filter_map(|b| b["url"].as_str().map(String::from)));
+            }
+        }
+        out
+    }
+
     /// Labels of the callback buttons on the most recent message sent to `chat`.
     pub fn last_buttons(&self, chat: i64) -> Vec<(String, String)> {
         let s = self.state.lock().unwrap();

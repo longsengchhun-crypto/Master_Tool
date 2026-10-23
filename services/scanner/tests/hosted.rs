@@ -59,6 +59,13 @@ fn rig_with(scanner: Arc<Scanner>) -> Rig {
     Rig { svc, store, mock, _dir: dir }
 }
 
+/// The person has the SENTRIX app installed and linked (what the bot now requires before it does anything for them).
+fn give_app(store: &JobStore, user: i64) {
+    if store.devices_of(user).is_empty() {
+        store.device_create(user, "Test computer", &sentrix_core::hosted_store::token_hash(&format!("tok-{user}")), now_ms()).unwrap();
+    }
+}
+
 fn code_in(text: &str, open: &str, close: &str) -> String {
     let a = text.find(open).expect("code start") + open.len();
     let b = text[a..].find(close).expect("code end") + a;
@@ -67,6 +74,7 @@ fn code_in(text: &str, open: &str, close: &str) -> String {
 
 /// The person presses Start, then "Protect a group", and the group code comes back inside the link button.
 fn group_code_for(r: &Rig, user: i64, n: &mut i64) -> String {
+    give_app(&r.store, user);
     r.mock.add_start(*n, user, "Sam");
     *n += 1;
     assert!(until(15, || r.mock.texts_in(user).iter().any(|t| t.contains("What do you want to protect"))));
@@ -75,8 +83,9 @@ fn group_code_for(r: &Rig, user: i64, n: &mut i64) -> String {
     r.mock.add_callback(*n, user, "m:group");
     *n += 1;
     assert!(until(15, || steps(r) > before));
-    let urls = r.mock.last_urls(user);
-    let url = urls.first().expect("a link button").clone();
+    // The newest group link in the whole chat: a "now protected" notice from the previous group may land after this message.
+    let urls = r.mock.all_urls(user);
+    let url = urls.last().expect("a link button").clone();
     assert!(url.starts_with("https://t.me/sentrix_test_bot?startgroup=g_"), "{url}");
     url.split("startgroup=").nth(1).unwrap().to_string()
 }
@@ -97,6 +106,7 @@ fn link(r: &Rig, user: i64, chat: i64, n: &mut i64) {
 #[test]
 fn pressing_start_offers_the_two_choices_and_nothing_else_is_switched_on() {
     let r = rig();
+    give_app(&r.store, SAM);
     r.mock.add_start(1, SAM, "Sam");
     assert!(until(15, || r.mock.texts_in(SAM).iter().any(|t| t.contains("What do you want to protect"))));
     let t = r.mock.texts_in(SAM)[0].clone();
@@ -104,13 +114,14 @@ fn pressing_start_offers_the_two_choices_and_nothing_else_is_switched_on() {
     let b: Vec<String> = r.mock.last_buttons(SAM).into_iter().map(|(label, _)| label).collect();
     assert!(b.contains(&"Protect a group".to_string()) && b.contains(&"Protect my account".to_string()), "{b:?}");
     assert!(r.store.user_reachable(SAM));
-    assert!(r.store.groups_list().unwrap().is_empty() && r.store.devices_of(SAM).is_empty(), "choosing nothing protects nothing");
+    assert!(r.store.groups_list().unwrap().is_empty(), "choosing nothing protects nothing");
     r.svc.stop();
 }
 
 #[test]
 fn a_file_sent_to_the_bot_privately_is_not_scanned_and_the_person_is_pointed_to_the_menu() {
     let r = rig();
+    give_app(&r.store, SAM);
     r.mock.add_start(1, SAM, "Sam");
     assert!(until(15, || r.mock.texts_in(SAM).len() >= 1));
     r.mock.add_document_update(2, SAM, SAM, "invoice.pdf", b"%PDF-1.4".to_vec());
@@ -123,6 +134,7 @@ fn a_file_sent_to_the_bot_privately_is_not_scanned_and_the_person_is_pointed_to_
 #[test]
 fn protect_my_account_gives_a_one_time_code_and_explains_that_the_login_stays_on_their_computer() {
     let r = rig();
+    give_app(&r.store, SAM);
     r.mock.add_start(1, SAM, "Sam");
     assert!(until(15, || r.mock.texts_in(SAM).len() >= 1));
     r.mock.add_callback(2, SAM, "m:account");
@@ -140,6 +152,8 @@ fn protect_my_account_gives_a_one_time_code_and_explains_that_the_login_stays_on
 #[test]
 fn opening_the_bot_from_the_app_shows_the_code_immediately_without_a_menu_step() {
     let r = rig();
+    give_app(&r.store, SAM);
+    give_app(&r.store, KIM);
     r.mock.add_private_text(1, SAM, "/start account");
     assert!(until(15, || r.mock.texts_in(SAM).iter().any(|t| t.contains("<code>"))), "{:?}", r.mock.texts_in(SAM));
     let t = r.mock.texts_in(SAM)[0].clone();
@@ -357,6 +371,7 @@ fn files_posted_in_different_groups_at_once_do_not_wait_for_each_other() {
 #[test]
 fn a_conflict_with_another_program_is_named_in_the_log_and_the_bot_recovers_by_itself() {
     let r = rig();
+    give_app(&r.store, SAM);
     // Another program (a second copy, or an app with this same bot) is reading the messages.
     r.mock.conflict_next_polls(1);
     r.mock.add_start(1, SAM, "Sam");
@@ -375,6 +390,7 @@ const H: i64 = -1004444444444; // Sam's Scan History group
 const H2: i64 = -1005555555555; // Kim's
 
 fn make_history(r: &Rig, chat: i64, owner: i64, n: &mut i64) {
+    give_app(&r.store, owner);
     r.mock.add_group(chat, &[owner], false, false);
     r.mock.add_bot_joined(*n, chat, "Scan History", owner);
     *n += 1;
@@ -537,6 +553,7 @@ fn a_person_can_protect_many_groups_and_the_list_pages() {
 fn a_group_with_the_right_name_is_not_used_by_someone_who_is_not_in_it() {
     let r = rig();
     let mut n = 1;
+    give_app(&r.store, KIM);
     r.mock.add_group(H, &[KIM], false, false);
     r.mock.set_not_in_group(H, SAM);
     // Sam claims a group Telegram says Sam is not in.
@@ -799,6 +816,148 @@ fn a_relay_report_for_someone_who_never_started_the_bot_is_refused_with_a_clear_
     r.store.user_set_blocked(SAM, true);
     let e = RelayClient::new(&base, &linked.token).unwrap().send_reply(0, "hello", None).unwrap_err();
     assert!(e.to_string().contains("Start"), "{e}");
+    server.stop();
+    r.svc.stop();
+}
+
+// ---- the app comes first -----------------------------------------------------------------------------------------
+
+/// Every way a person could try to get something done through the bot without having the app.
+#[test]
+fn without_the_app_the_bot_offers_only_the_download_and_a_link_code() {
+    let r = rig();
+    r.mock.add_start(1, SAM, "Sam");
+    assert!(until(15, || r.mock.texts_in(SAM).iter().any(|t| t.contains("Install the SENTRIX app first"))), "{:?}", r.mock.texts_in(SAM));
+    let t = r.mock.texts_in(SAM)[0].clone();
+    assert!(t.contains("Welcome, Sam") && t.contains("https://get.example/sentrix"), "the download comes with the first message: {t}");
+    let code = code_in(&t, "<code>", "</code>").replace('-', "");
+    assert_eq!(r.store.code_peek(CodeKind::Device, &code, now_ms()), Some(SAM), "and so does the code that links the app");
+    let labels: Vec<String> = r.mock.last_buttons(SAM).into_iter().map(|(l, _)| l).collect();
+    assert!(!labels.contains(&"Protect a group".to_string()) && !labels.contains(&"Protect my account".to_string()), "no feature is offered: {labels:?}");
+    // Pressing the old buttons, typing, sending a file, or using the deep links changes nothing.
+    let before = r.mock.texts_in(SAM).len();
+    r.mock.add_callback(2, SAM, "m:group");
+    r.mock.add_callback(3, SAM, "m:main");
+    r.mock.add_private_text(4, SAM, "hello");
+    r.mock.add_private_text(5, SAM, "/start group");
+    r.mock.add_private_text(6, SAM, "/menu");
+    r.mock.add_document_update(7, SAM, SAM, "invoice.pdf", b"%PDF-1.4".to_vec());
+    assert!(until(20, || r.mock.texts_in(SAM).len() >= before + 6), "{:?}", r.mock.texts_in(SAM));
+    std::thread::sleep(Duration::from_secs(1));
+    let after = r.mock.texts_in(SAM);
+    assert!(after[before..].iter().all(|t| t.contains("Install the SENTRIX app first")), "every attempt gets the same answer: {:?}", &after[before..]);
+    assert!(r.mock.last_urls(SAM).iter().all(|u| !u.contains("startgroup")), "no group link is ever issued");
+    assert!(r.store.groups_list().unwrap().is_empty());
+    assert_eq!(r.mock.called("getFile"), 0);
+    r.svc.stop();
+}
+
+#[test]
+fn linking_the_app_unlocks_the_bot() {
+    let r = rig();
+    let server = RelayServer::start("127.0.0.1:0", r.store.clone(), false).unwrap();
+    let base = relay_url(&server);
+    r.mock.add_start(1, SAM, "Sam");
+    assert!(until(15, || r.mock.texts_in(SAM).iter().any(|t| t.contains("Install the SENTRIX app first"))));
+    let code = code_in(&r.mock.texts_in(SAM)[0], "<code>", "</code>");
+    assert!(!r.store.app_active(SAM, now_ms()));
+    relay::link(&base, &code, "Sam's laptop").expect("the app links with the code the bot showed");
+    assert!(r.store.app_active(SAM, now_ms()));
+    r.mock.add_start(2, SAM, "Sam");
+    assert!(until(15, || r.mock.texts_in(SAM).iter().any(|t| t.contains("What do you want to protect"))), "{:?}", r.mock.texts_in(SAM));
+    let b: Vec<String> = r.mock.last_buttons(SAM).into_iter().map(|(l, _)| l).collect();
+    assert!(b.contains(&"Protect a group".to_string()), "{b:?}");
+    // And nobody else is unlocked by it.
+    r.mock.add_start(3, KIM, "Kim");
+    assert!(until(15, || r.mock.texts_in(KIM).iter().any(|t| t.contains("Install the SENTRIX app first"))));
+    server.stop();
+    r.svc.stop();
+}
+
+#[test]
+fn a_group_cannot_be_protected_without_the_app_and_the_same_link_works_once_the_app_is_linked() {
+    let r = rig();
+    r.mock.add_start(1, SAM, "Sam");
+    assert!(until(15, || r.store.user_reachable(SAM)));
+    // A link made before this rule existed (or by hand) still cannot switch anything on.
+    let code = sentrix_core::hosted::new_group_code();
+    r.store.code_issue(CodeKind::Group, SAM, &code, now_ms() + 600_000).unwrap();
+    r.mock.add_group(A, &[SAM], false, false);
+    r.mock.add_bot_joined(2, A, "Design team", SAM);
+    r.mock.add_startgroup(3, A, 3, SAM, &code);
+    assert!(until(15, || r.mock.texts_in(A).iter().any(|t| t.contains("app must be installed and linked first"))), "{:?}", r.mock.texts_in(A));
+    assert!(r.store.group_get(A).unwrap().is_some_and(|g| !g.enabled));
+    assert_eq!(r.store.code_peek(CodeKind::Group, &code, now_ms()), Some(SAM), "the link is not used up");
+    // /setup on is refused the same way.
+    r.mock.add_group_text(4, A, 4, SAM, "/setup on");
+    assert!(until(15, || r.mock.texts_in(A).iter().filter(|t| t.contains("app must be installed and linked first")).count() >= 2), "{:?}", r.mock.texts_in(A));
+    assert!(r.store.group_get(A).unwrap().is_some_and(|g| !g.enabled));
+    // Once the app is linked, the very same link works.
+    give_app(&r.store, SAM);
+    r.mock.add_startgroup(5, A, 5, SAM, &code);
+    assert!(until(15, || r.store.group_get(A).unwrap().is_some_and(|g| g.enabled && g.enabled_by == Some(SAM))));
+    r.svc.stop();
+}
+
+#[test]
+fn a_scan_history_group_is_not_linked_without_the_app() {
+    let r = rig();
+    r.mock.add_start(1, SAM, "Sam");
+    assert!(until(15, || r.store.user_reachable(SAM)));
+    r.mock.add_group(H, &[SAM], false, false);
+    r.mock.add_bot_joined(2, H, "Scan History", SAM);
+    assert!(until(15, || r.mock.texts_in(SAM).iter().any(|t| t.contains("cannot use this group as your Scan History yet"))), "the person is told privately: {:?}", r.mock.texts_in(SAM));
+    assert!(r.store.history_get(SAM).is_none());
+    // Typing /link in the group is answered in the group.
+    r.mock.add_group_text_titled(3, H, 3, SAM, "Scan History", "/link");
+    assert!(until(15, || r.mock.texts_in(H).iter().any(|t| t.contains("SENTRIX app must be installed"))), "{:?}", r.mock.texts_in(H));
+    assert!(r.store.history_get(SAM).is_none());
+    // With the app linked, /link works.
+    give_app(&r.store, SAM);
+    r.mock.add_group_text_titled(4, H, 4, SAM, "Scan History", "/link");
+    assert!(until(15, || r.store.history_get(SAM).is_some_and(|h| h.0 == H)));
+    r.svc.stop();
+}
+
+#[test]
+fn files_are_not_checked_while_the_owner_has_no_working_app_and_the_owner_is_told_once_privately() {
+    let r = rig();
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    // The app has not been seen for 15 days (uninstalled, or the computer is gone).
+    let id = r.store.devices_of(SAM)[0].id.clone();
+    r.store.device_touch(&id, now_ms() - 15 * 24 * 3600 * 1000);
+    assert!(!r.store.app_active(SAM, now_ms()));
+    r.mock.add_group_document(n, A, 90, MEMBER, "one.pdf", b"%PDF-1.4".to_vec(), None);
+    n += 1;
+    r.mock.add_group_document(n, A, 91, MEMBER, "two.pdf", b"%PDF-1.4".to_vec(), None);
+    n += 1;
+    assert!(until(20, || r.mock.texts_in(SAM).iter().any(|t| t.contains("not being checked"))), "{:?}", r.mock.texts_in(SAM));
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(r.mock.called("getFile"), 0, "nothing is downloaded or checked");
+    assert_eq!(r.mock.texts_in(SAM).iter().filter(|t| t.contains("not being checked")).count(), 1, "told once, not per file");
+    assert!(!r.mock.texts_in(SAM).iter().any(|t| t.contains("one.pdf") || t.contains("two.pdf")), "no report exists for a file nobody checked");
+    assert!(r.mock.texts_in(A).is_empty(), "the group itself stays silent: {:?}", r.mock.texts_in(A));
+    // The app checks in again (it does so every minute while it runs): protection resumes by itself.
+    r.store.device_touch(&id, now_ms());
+    r.mock.add_group_document(n, A, 92, MEMBER, "three.pdf", b"%PDF-1.4".to_vec(), None);
+    assert!(until(20, || r.mock.texts_in(SAM).iter().any(|t| t.contains("three.pdf"))), "{:?}", r.mock.texts_in(SAM));
+    r.svc.stop();
+}
+
+#[test]
+fn the_relay_status_check_keeps_a_working_app_counted_as_in_use() {
+    let r = rig();
+    let server = RelayServer::start("127.0.0.1:0", r.store.clone(), false).unwrap();
+    let base = relay_url(&server);
+    let linked = relay::link(&base, &issue_code(&r.store, SAM), "Sam's laptop").unwrap();
+    let id = r.store.devices_of(SAM)[0].id.clone();
+    r.store.device_touch(&id, now_ms() - 13 * 24 * 3600 * 1000);
+    assert!(r.store.app_active(SAM, now_ms()));
+    r.store.device_touch(&id, now_ms() - 15 * 24 * 3600 * 1000);
+    assert!(!r.store.app_active(SAM, now_ms()), "silent for 15 days");
+    assert!(RelayClient::new(&base, &linked.token).unwrap().status().unwrap().0);
+    assert!(r.store.app_active(SAM, now_ms()), "one check-in from the app and it counts again");
     server.stop();
     r.svc.stop();
 }

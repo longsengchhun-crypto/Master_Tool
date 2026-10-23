@@ -209,16 +209,36 @@ impl Inner {
                     u.message_id,
                     &format!("noton:{}", u.update_id),
                     "group_notice",
-                    "<b>SENTRIX is in this group, but protection is not on, so this file was not checked.</b> A group administrator turns it on: open the SENTRIX bot in a private chat, press Start, choose Protect a group, then Choose a group. Results are sent to that person privately, not posted here.".into(),
+                    "<b>SENTRIX is in this group, but protection is not on, so this file was not checked.</b> A group member turns it on: open the SENTRIX bot in a private chat, press Start, install and link the SENTRIX app (the bot has the download), choose Protect a group, then Choose a group. Results are sent to that person privately, not posted here.".into(),
                     false,
                 );
             }
             return;
         }
         if let Some(doc) = &u.document {
+            // Shared bot: a group is checked only while the person who protects it has the SENTRIX app linked and in use.
+            // Nothing is downloaded or checked otherwise, and the group itself hears nothing; the owner is told privately.
+            if self.cfg.read().unwrap().hosted.is_some() && !g.enabled_by.is_some_and(|o| self.store.app_active(o, now)) {
+                self.app_lapsed_notice(&g, now);
+                return;
+            }
             self.queue_document(me, &g, u, doc);
         }
         // Photos, videos, audio and stickers are deliberately not scanned (see the module comment).
+    }
+
+    /// The person who protects a group no longer has the SENTRIX app linked and in use, so its files are not being checked.
+    /// Tell them, privately, at most once a day per group. The protected group itself stays silent.
+    fn app_lapsed_notice(&self, g: &Group, now: i64) {
+        let Some(owner) = g.enabled_by else { return };
+        if !self.notice_due(g.chat_id, "app_lapsed", Duration::from_secs(24 * 3600)) || !self.store.user_reachable(owner) {
+            return;
+        }
+        let url = self.cfg.read().unwrap().hosted.as_ref().map(|h| h.download_url.clone()).unwrap_or_default();
+        let get = if url.is_empty() { String::new() } else { format!(" Download: {}", esc(&url)) };
+        let title: String = g.title.chars().filter(|c| !c.is_control()).take(60).collect();
+        let t = format!("<b>{}</b> is <b>not being checked</b>. I only protect groups for people who use the SENTRIX app, and yours is not linked or has not been seen for 14 days. Open the SENTRIX app on your computer, or install and link it from this bot's menu, and protection continues.{get}", esc(&title));
+        let _ = self.store.enqueue_notification_to(&format!("applapsed:{}:{}", g.chat_id, now / 86_400_000), "hosted_notice", &t, now, Some(owner), None);
     }
 
     /// Where a group's scan reports go: the private chat of the person who protects it (shared bot), or the bot owner's
@@ -368,6 +388,17 @@ impl Inner {
         let now = now_ms();
         let member = bot.get_chat_member(chat, user).map(|m| m.is_member());
         match member {
+            Ok(true) if !self.store.app_active(user, now) => {
+                // No app, no Scan History. Added by hand: tell the person privately. Typed /link: answer in the group.
+                let t = "I cannot use this group as your Scan History yet: the SENTRIX app must be installed and linked first. Open the SENTRIX bot privately for the download and your link code, then send /link in this group.";
+                if quiet_on_refusal {
+                    if self.store.user_reachable(user) {
+                        let _ = self.store.enqueue_notification_to(&format!("histapp:{chat}:{update_id}"), "hosted_notice", t, now, Some(user), None);
+                    }
+                } else {
+                    let _ = self.say(chat, None, &format!("histapp:{chat}:{update_id}"), "group_notice", t.into(), false);
+                }
+            }
             Ok(true) => {
                 if self.store.history_set(user, chat, title, now).is_ok() {
                     self.event("history_linked", "info", "A Scan History group was linked to a person. Their scan reports now go there.");
@@ -580,6 +611,9 @@ impl Inner {
             ["on"] => {
                 if self.cfg.read().unwrap().hosted.is_some() && !self.store.user_reachable(uid) {
                     return say("start", "Open the SENTRIX bot privately and press Start first, so I can send you the results. Then send /setup on again.".into());
+                }
+                if self.cfg.read().unwrap().hosted.is_some() && !self.store.app_active(uid, now) {
+                    return say("app", "The SENTRIX app must be installed and linked first. Open the SENTRIX bot privately for the download and your link code. Then send /setup on again.".into());
                 }
                 let _ = self.store.group_set_enabled(chat, true, uid, now);
                 if self.cfg.read().unwrap().hosted.is_some() {

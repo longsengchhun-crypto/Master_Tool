@@ -11,6 +11,10 @@ use sha2::{Digest, Sha256};
 /// bot post into thousands of rooms.
 pub const MAX_HISTORY_PER_PERSON: i64 = 25;
 
+/// How long a linked app may stay silent before the bot treats it as gone (uninstalled, or the computer long off).
+/// The app contacts the relay about once a minute while it runs.
+pub const APP_SEEN_GRACE_MS: i64 = 14 * 24 * 60 * 60 * 1000;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryRoom {
     pub chat_id: i64,
@@ -146,6 +150,24 @@ impl JobStore {
         let _ = self.conn.lock().unwrap().execute("UPDATE relay_devices SET last_seen_at=?2 WHERE id=?1", params![id, now]);
     }
 
+    /// The SENTRIX app is installed and in use for this person: a linked, not unlinked computer that has been in touch with
+    /// the relay (the app checks in about once a minute while it runs) within `APP_SEEN_GRACE_MS`. Everything the bot offers
+    /// depends on this, so nobody can use the bot without the app.
+    pub fn app_active(&self, user_id: i64, now: i64) -> bool {
+        self.conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT 1 FROM relay_devices WHERE user_id=?1 AND revoked_at IS NULL AND COALESCE(last_seen_at, created_at) > ?2 LIMIT 1",
+                params![user_id, now - APP_SEEN_GRACE_MS],
+                |_| Ok(()),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .is_some()
+    }
+
     pub fn devices_of(&self, user_id: i64) -> Vec<Device> {
         let c = self.conn.lock().unwrap();
         let Ok(mut st) = c.prepare("SELECT id, user_id, name, created_at, last_seen_at FROM relay_devices WHERE user_id=?1 AND revoked_at IS NULL ORDER BY created_at") else { return vec![] };
@@ -267,6 +289,23 @@ mod tests {
         assert!(s.device_by_token("secret-token").is_some());
         assert!(s.device_revoke(7, &id, 5));
         assert!(s.device_by_token("secret-token").is_none(), "an unlinked app is refused");
+    }
+
+    #[test]
+    fn the_app_counts_only_while_linked_and_seen_recently() {
+        let s = JobStore::open_in_memory().unwrap();
+        let day = 24 * 60 * 60 * 1000;
+        let t0 = 1_000 * day;
+        assert!(!s.app_active(7, t0), "no app, no access");
+        let id = s.device_create(7, "Sam's laptop", &token_hash("tok"), t0).unwrap();
+        assert!(s.app_active(7, t0 + day), "just linked counts");
+        assert!(!s.app_active(8, t0 + day), "another person's app is not mine");
+        assert!(!s.app_active(7, t0 + APP_SEEN_GRACE_MS + 1), "never seen again: gone");
+        s.device_touch(&id, t0 + 10 * day);
+        assert!(s.app_active(7, t0 + 20 * day), "a check-in renews it");
+        assert!(!s.app_active(7, t0 + 10 * day + APP_SEEN_GRACE_MS + 1), "silent too long: gone");
+        s.device_revoke(7, &id, t0 + 11 * day);
+        assert!(!s.app_active(7, t0 + 11 * day), "unlinked: gone at once");
     }
 
     #[test]

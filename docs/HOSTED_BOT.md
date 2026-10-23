@@ -9,8 +9,31 @@ posted in a group.
 > Telegram, because that needs the bot token on a machine you run (see "What you need to do"). Treat the Telegram-facing
 > behaviour (Start, the group picker, the privacy setting, delivery) as **implemented, not yet proven live**.
 
+## The app comes first (rule)
+
+**Nobody can use the bot without the SENTRIX desktop app.** A person who finds the bot and presses Start is shown one
+thing: *Install the SENTRIX app first*, with the download link and a one-time code to link the app. No menu, no group
+link, no Scan History, nothing is checked for them until the app is installed and linked.
+
+* **"Has the app"** means: a computer linked through the relay (the code typed into the app), not unlinked, that has been in
+  touch with the relay within the last **14 days**. The app contacts the relay about once a minute while it runs, so an
+  uninstalled app, or a computer that has been off for two weeks, stops counting by itself (`app_active` in `hosted_store.rs`).
+* **What is blocked without it:** the menu (Protect a group / Protect my account), the group link (`/start group`), resuming a
+  paused group, choosing where reports go, `/setup on` in a group, linking a Scan History group (automatic or `/link`), and the
+  scanning of files in groups the person protects. A group link made before the rule is not used up when refused; it works
+  once the app is linked, if still inside its 30 minutes.
+* **What is still allowed:** `/help`, getting the download and a link code, and *reducing* things: pausing or removing a group,
+  unlinking a computer, and *My protection*.
+* **Groups already protected** by someone without a working app stop being checked (no download, no scan). The owner gets one
+  private message per group per day saying why; the protected group itself hears nothing. Protection resumes on its own the
+  moment the app checks in again.
+* **Honest limit:** the bot cannot see whether the app is really installed, only that something holding a valid app token has
+  been in touch. Someone who calls the relay by hand with a code from the bot would pass the check. The token and the code
+  are issued only to that person, so this is not a way into anyone else's protection, but it is not proof of installation.
+
 ## What the customer sees
 
+0. **Install the app.** Before anything below, see *The app comes first*. Steps 1 to 4 describe a person whose app is linked.
 1. **Start.** They open the bot and press Start. The bot answers with two buttons: **Protect a group** and
    **Protect my account** (plus *My protection* and *How it works*).
 2. **Protect a group.** The customer makes a new group called **Scan History** and adds the bot to it (they can add other people
