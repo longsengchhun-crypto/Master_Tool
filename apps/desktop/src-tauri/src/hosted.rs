@@ -8,8 +8,10 @@
 use crate::commands::{Res, Shared};
 use crate::protection::{apply, telegram_status, TelegramStatus};
 use crate::state::AppState;
+use sentrix_core::edge;
 use sentrix_core::queue::now_ms;
 use sentrix_core::relay::{self, RelayClient};
+use sentrix_core::telegram::MAX_BOT_DOWNLOAD;
 use sentrix_core::telegram::Courier;
 use serde::Serialize;
 use std::path::Path;
@@ -136,6 +138,26 @@ fn forget_locally(st: &AppState, removed_remotely: bool) {
 
 fn computer_name() -> String {
     std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).ok().map(|s| s.chars().filter(|c| c.is_ascii_graphic() || *c == ' ').take(40).collect::<String>()).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "My computer".into())
+}
+
+/// Files posted in groups this person protects through the bot are handed to this computer to be checked here, with this
+/// computer's own scan engine, not on the bot's server. Returns how many were answered (0 when there was nothing to do,
+/// or this computer is not linked, or the relay could not be reached).
+pub fn edge_poll(st: &Arc<AppState>) -> usize {
+    if !st.store.settings.lock().unwrap().telegram.bot_allowed {
+        return 0;
+    }
+    let Some(c) = (if relay_out(st).linked { client(st) } else { None }) else { return 0 };
+    let scan = |origin: &str, name: &str, bytes: &[u8]| st.service.scan_ephemeral(origin, name, &mut &bytes[..], MAX_BOT_DOWNLOAD);
+    match edge::run_once(&c, &scan) {
+        Ok(n) => {
+            if n > 0 {
+                st.jobs.add_event("group_files_checked", "info", &format!("{n} file(s) from your protected Telegram groups were checked on this computer."), now_ms());
+            }
+            n
+        }
+        Err(_) => 0,
+    }
 }
 
 /// Called every minute or so. Detects that the person unlinked this computer in the bot, and that the bot cannot reach them.

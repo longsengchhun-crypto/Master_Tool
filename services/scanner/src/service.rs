@@ -686,6 +686,16 @@ impl ProtectionService {
             }
         })));
 
+        // Files that groups handed to customers' computers come back as verdicts here and become reports.
+        let me = inner.clone();
+        th.push(spawn("sentrix-edge", Box::new(move || {
+            while me.nap(400) {
+                if me.edge_on() && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| me.edge_tick())).is_err() {
+                    me.event("worker_panic", "critical", "Handling a verdict from a customer's computer crashed internally and was contained.");
+                }
+            }
+        })));
+
         let me = inner.clone();
         th.push(spawn("sentrix-health", Box::new(move || {
             while me.nap(5000) {

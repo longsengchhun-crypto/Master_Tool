@@ -3841,7 +3841,7 @@ dependencies = [
 
 [[package]]
 name = "sentrix-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aho-corasick",
  "base64 0.22.1",
@@ -3873,7 +3873,7 @@ dependencies = [
 
 [[package]]
 name = "sentrix-desktop"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",

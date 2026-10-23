@@ -4,6 +4,8 @@ pub mod account;
 pub mod account_td;
 pub mod archive;
 pub mod clamav;
+pub mod edge;
+pub mod edge_host;
 pub mod eicar;
 pub mod group;
 pub mod guard;

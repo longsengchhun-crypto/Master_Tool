@@ -51,7 +51,7 @@ fn rig_with(scanner: Arc<Scanner>) -> Rig {
     let mut cfg = ServiceConfig::new(dir.path().join("tmp"));
     cfg.realtime = false;
     cfg.group_shield = true;
-    cfg.hosted = Some(HostedConfig { download_url: "https://get.example/sentrix".into() });
+    cfg.hosted = Some(HostedConfig { download_url: "https://get.example/sentrix".into(), ..Default::default() });
     let mock = Mock::start();
     let svc = ProtectionService::new(scanner, q, store.clone(), Arc::new(Collect::default()), cfg);
     svc.set_bot(Some(Arc::new(BotClient::with_base(TOKEN, &mock.base).unwrap())));
@@ -959,6 +959,262 @@ fn the_relay_status_check_keeps_a_working_app_counted_as_in_use() {
     assert!(RelayClient::new(&base, &linked.token).unwrap().status().unwrap().0);
     assert!(r.store.app_active(SAM, now_ms()), "one check-in from the app and it counts again");
     server.stop();
+    r.svc.stop();
+}
+
+// ---- checking on the customer's own computer ---------------------------------------------------------------------
+
+use sentrix_core::edge::{self, EdgeJob, EdgeResult};
+use sentrix_core::telegram::MAX_BOT_DOWNLOAD;
+use sentrix_core::types::{ScanReport, Verdict};
+
+/// The shared bot in its normal mode: the server hands files to the owner's app and scans nothing itself.
+fn rig_edge(wait_ms: i64) -> Rig {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(JobStore::open(&dir.path().join("botd.db")).unwrap());
+    let q = Arc::new(Quarantine::open(dir.path().join("vault")).unwrap());
+    let mut cfg = ServiceConfig::new(dir.path().join("tmp"));
+    cfg.realtime = false;
+    cfg.group_shield = true;
+    cfg.hosted = Some(HostedConfig { download_url: "https://get.example/sentrix".into(), edge: true, edge_wait_ms: wait_ms });
+    let mock = Mock::start();
+    let svc = ProtectionService::new(Arc::new(Scanner::new(Limits::default(), None)), q, store.clone(), Arc::new(Collect::default()), cfg);
+    svc.set_bot(Some(Arc::new(BotClient::with_base(TOKEN, &mock.base).unwrap())));
+    svc.start();
+    Rig { svc, store, mock, _dir: dir }
+}
+
+/// A relay that can hand out files (like the real bot service), and an app linked to it for `user`.
+fn relay_with_files(r: &Rig) -> RelayServer {
+    let bot: Arc<dyn edge::FileSource> = Arc::new(BotClient::with_base(TOKEN, &r.mock.base).unwrap());
+    RelayServer::start_with_files("127.0.0.1:0", r.store.clone(), false, Some(bot)).unwrap()
+}
+
+fn app_for(r: &Rig, base: &str, user: i64) -> RelayClient {
+    let linked = relay::link(base, &issue_code(&r.store, user), "Test computer").unwrap();
+    RelayClient::new(base, &linked.token).unwrap()
+}
+
+/// What an app would send back for a file, without needing a scan engine in the test.
+fn verdict_report(v: Verdict, complete: bool, sigs: &[&str]) -> ScanReport {
+    let job = EdgeJob { id: "x".into(), owner: 0, group_chat: 0, message_id: 0, file_id: "f".into(), file_unique_id: None, name: "x".into(), size: 1, state: "done".into(), result: None, created_at: 0 };
+    let res = EdgeResult {
+        verdict: v,
+        complete,
+        sha256: "ab".repeat(32),
+        size: 1,
+        summary: if complete { "checked".into() } else { "the engine was not available".into() },
+        signatures: sigs.iter().map(|s| s.to_string()).collect(),
+        threat_title: sigs.first().map(|_| "Test file".to_string()),
+        threat_goal: sigs.first().map(|_| "Nothing, this is a test signature.".to_string()),
+        threat_basis: sigs.first().map(|_| "identified".to_string()),
+    };
+    edge::report_from_result(&job, &res)
+}
+
+#[test]
+fn edge_the_server_neither_downloads_nor_scans_a_file_posted_in_a_protected_group() {
+    let r = rig_edge(0);
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    r.mock.add_group_document(n, A, 50, MEMBER, "invoice.pdf", b"%PDF-1.4 hello".to_vec(), None);
+    assert!(until(15, || r.store.edge_waiting(SAM) == 1), "the file is recorded as a job for Sam's computer");
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(r.mock.called("getFile"), 0, "the server did not fetch the file");
+    assert!(!r.mock.texts_in(SAM).iter().any(|t| t.contains("invoice.pdf")), "and there is no report yet: nobody has checked it");
+    assert!(r.mock.texts_in(A).is_empty(), "the group stays silent");
+    r.svc.stop();
+}
+
+#[test]
+fn edge_the_owners_app_fetches_checks_and_answers_and_the_report_reaches_the_owner() {
+    let r = rig_edge(0);
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    let server = relay_with_files(&r);
+    let base = relay_url(&server);
+    let app = app_for(&r, &base, SAM);
+    let content = b"MZ-not-really-a-program, but bytes the app must receive exactly".to_vec();
+    r.mock.add_group_document(n, A, 51, MEMBER, "setup.exe", content.clone(), None);
+    assert!(until(15, || r.store.edge_waiting(SAM) == 1));
+    let seen = std::sync::Mutex::new(Vec::<(String, String, Vec<u8>)>::new());
+    let scan = |origin: &str, name: &str, bytes: &[u8]| -> Result<ScanReport, String> {
+        seen.lock().unwrap().push((origin.into(), name.into(), bytes.to_vec()));
+        Ok(verdict_report(Verdict::Malicious, true, &["Test.Signature.A"]))
+    };
+    assert_eq!(edge::run_once(&app, &scan).unwrap(), 1);
+    {
+        let s = seen.lock().unwrap();
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0].1, "setup.exe");
+        assert!(s[0].0.contains("Design team"), "the app is told which group: {}", s[0].0);
+        assert_eq!(s[0].2, content, "the app received exactly the bytes that were posted");
+    }
+    assert!(until(20, || r.mock.texts_in(H).iter().any(|t| t.contains("MALICIOUS") && t.contains("setup.exe"))), "{:?}", r.mock.texts_in(H));
+    let msg = r.mock.texts_in(H).into_iter().find(|t| t.contains("MALICIOUS")).unwrap();
+    assert!(msg.contains("Test.Signature.A") && msg.contains("Design team"), "{msg}");
+    assert_eq!(r.mock.called("getFile"), 1, "the file crossed the server once, on its way to the owner's computer");
+    assert_eq!(r.store.edge_waiting(SAM), 0);
+    assert!(r.mock.texts_in(A).is_empty(), "the group never sees any of it: {:?}", r.mock.texts_in(A));
+    // Nothing is offered twice.
+    assert_eq!(edge::run_once(&app, &scan).unwrap(), 0);
+    server.stop();
+    r.svc.stop();
+}
+
+#[test]
+fn edge_a_clean_result_is_reported_and_an_incomplete_clean_is_never_believed() {
+    let r = rig_edge(0);
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    let server = relay_with_files(&r);
+    let app = app_for(&r, &relay_url(&server), SAM);
+    r.mock.add_group_document(n, A, 52, MEMBER, "ok.pdf", b"%PDF-1.4".to_vec(), None);
+    r.mock.add_group_document(n + 1, A, 53, MEMBER, "dodgy.pdf", b"%PDF-1.4".to_vec(), None);
+    assert!(until(15, || r.store.edge_waiting(SAM) == 2));
+    let scan = |_: &str, name: &str, _: &[u8]| -> Result<ScanReport, String> {
+        // A careless or dishonest app says "clean" for a file whose check did not finish.
+        Ok(if name == "ok.pdf" { verdict_report(Verdict::Clean, true, &[]) } else { verdict_report(Verdict::Clean, false, &[]) })
+    };
+    assert_eq!(edge::run_once(&app, &scan).unwrap(), 2);
+    assert!(until(20, || r.mock.texts_in(H).iter().any(|t| t.contains("ok.pdf")) && r.mock.texts_in(H).iter().any(|t| t.contains("dodgy.pdf"))), "{:?}", r.mock.texts_in(H));
+    let ok = r.mock.texts_in(H).into_iter().find(|t| t.contains("ok.pdf")).unwrap();
+    let bad = r.mock.texts_in(H).into_iter().find(|t| t.contains("dodgy.pdf")).unwrap();
+    assert!(ok.contains("no known threat"), "{ok}");
+    assert!(bad.contains("could not be fully checked") && !bad.contains("no known threat"), "{bad}");
+    server.stop();
+    r.svc.stop();
+}
+
+#[test]
+fn edge_a_real_local_scan_without_an_engine_says_it_could_not_check_never_clean() {
+    let r = rig_edge(0);
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    let server = relay_with_files(&r);
+    let app = app_for(&r, &relay_url(&server), SAM);
+    r.mock.add_group_document(n, A, 54, MEMBER, "notes.txt", b"just some notes".to_vec(), None);
+    assert!(until(15, || r.store.edge_waiting(SAM) == 1));
+    // The app's own scanner (here the test's, with no antivirus engine installed).
+    let local = Arc::new(Scanner::new(Limits::default(), None));
+    let dir = tempfile::tempdir().unwrap();
+    let svc = ProtectionService::new(local, Arc::new(Quarantine::open(dir.path().join("vault")).unwrap()), Arc::new(JobStore::open_in_memory().unwrap()), Arc::new(Collect::default()), ServiceConfig::new(dir.path().join("tmp")));
+    let scan = |o: &str, n: &str, b: &[u8]| svc.scan_ephemeral(o, n, &mut &b[..], MAX_BOT_DOWNLOAD);
+    assert_eq!(edge::run_once(&app, &scan).unwrap(), 1);
+    assert!(until(20, || r.mock.texts_in(H).iter().any(|t| t.contains("notes.txt"))), "{:?}", r.mock.texts_in(H));
+    let msg = r.mock.texts_in(H).into_iter().find(|t| t.contains("notes.txt")).unwrap();
+    assert!(!msg.contains("no known threat"), "an unchecked file is never called safe: {msg}");
+    server.stop();
+    r.svc.stop();
+}
+
+#[test]
+fn edge_another_persons_app_cannot_list_fetch_or_answer_someones_files() {
+    let r = rig_edge(0);
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    let server = relay_with_files(&r);
+    let base = relay_url(&server);
+    let sam = app_for(&r, &base, SAM);
+    let kim = app_for(&r, &base, KIM);
+    r.mock.add_group_document(n, A, 55, MEMBER, "private.docx", b"PK secret".to_vec(), None);
+    assert!(until(15, || r.store.edge_waiting(SAM) == 1));
+    assert!(kim.jobs().unwrap().is_empty(), "Kim's app is offered nothing");
+    let job = sam.jobs().unwrap().remove(0);
+    assert_eq!(job.name, "private.docx");
+    assert!(kim.fetch_job_file(&job.id).is_err(), "Kim's app cannot download Sam's file");
+    let lie = edge::EdgeSubmit { ok: true, error: None, result: Some(EdgeResult { verdict: Verdict::Clean, complete: true, sha256: String::new(), size: 0, summary: String::new(), signatures: vec![], threat_title: None, threat_goal: None, threat_basis: None }) };
+    let _ = kim.submit_job_result(&job.id, &lie);
+    let j = r.store.edge_get(&job.id).unwrap();
+    assert!(j.state == "leased" && j.result.is_none(), "Kim's answer changed nothing: {j:?}");
+    // A made-up id, and a made-up token, get nothing either.
+    assert!(sam.fetch_job_file("00000000-0000-0000-0000-000000000000").is_err());
+    assert!(RelayClient::new(&base, &"a".repeat(64)).unwrap().jobs().is_err());
+    // Sam's own app still can, and only once.
+    assert_eq!(sam.fetch_job_file(&job.id).unwrap(), b"PK secret".to_vec());
+    sam.submit_job_result(&job.id, &lie).unwrap();
+    assert!(r.store.edge_get(&job.id).unwrap().state == "done");
+    server.stop();
+    r.svc.stop();
+}
+
+#[test]
+fn edge_a_file_nobody_picks_up_is_reported_as_not_checked_and_never_as_safe() {
+    let r = rig_edge(1_500);
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    r.mock.add_group_document(n, A, 56, MEMBER, "waiting.zip", b"PK".to_vec(), None);
+    assert!(until(20, || r.mock.texts_in(H).iter().any(|t| t.contains("waiting.zip") && t.contains("did not pick it up"))), "{:?}", r.mock.texts_in(H));
+    let msg = r.mock.texts_in(H).into_iter().find(|t| t.contains("waiting.zip")).unwrap();
+    assert!(msg.contains("not checked") && !msg.contains("no known threat"), "{msg}");
+    assert_eq!(r.store.edge_waiting(SAM), 0);
+    assert_eq!(r.mock.called("getFile"), 0, "and the server still never touched the file");
+    r.svc.stop();
+}
+
+#[test]
+fn edge_when_the_file_cannot_be_fetched_the_owner_is_told_it_was_not_checked() {
+    let r = rig_edge(0);
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    // A relay that has no way to reach Telegram.
+    let server = RelayServer::start("127.0.0.1:0", r.store.clone(), false).unwrap();
+    let app = app_for(&r, &relay_url(&server), SAM);
+    r.mock.add_group_document(n, A, 57, MEMBER, "gone.zip", b"PK".to_vec(), None);
+    assert!(until(15, || r.store.edge_waiting(SAM) == 1));
+    let scan = |_: &str, _: &str, _: &[u8]| -> Result<ScanReport, String> { panic!("nothing to scan") };
+    assert_eq!(edge::run_once(&app, &scan).unwrap(), 1);
+    assert!(until(20, || r.mock.texts_in(H).iter().any(|t| t.contains("gone.zip") && t.contains("could not be checked on your computer"))), "{:?}", r.mock.texts_in(H));
+    server.stop();
+    r.svc.stop();
+}
+
+#[test]
+fn edge_a_crash_in_the_apps_scan_is_contained_and_reported_not_clean() {
+    let r = rig_edge(0);
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    make_history(&r, H, SAM, &mut n);
+    let server = relay_with_files(&r);
+    let app = app_for(&r, &relay_url(&server), SAM);
+    r.mock.add_group_document(n, A, 58, MEMBER, "boom.pdf", b"%PDF".to_vec(), None);
+    assert!(until(15, || r.store.edge_waiting(SAM) == 1));
+    let scan = |_: &str, _: &str, _: &[u8]| -> Result<ScanReport, String> { panic!("scanner bug") };
+    assert_eq!(edge::run_once(&app, &scan).unwrap(), 1, "the app survives and answers");
+    assert!(until(20, || r.mock.texts_in(H).iter().any(|t| t.contains("boom.pdf") && t.contains("not checked"))), "{:?}", r.mock.texts_in(H));
+    server.stop();
+    r.svc.stop();
+}
+
+#[test]
+fn edge_an_unlinked_app_is_given_no_work() {
+    let r = rig_edge(0);
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    let server = relay_with_files(&r);
+    let app = app_for(&r, &relay_url(&server), SAM);
+    assert!(app.jobs().unwrap().is_empty());
+    assert!(app.unlink());
+    assert!(app.jobs().is_err(), "once unlinked from the bot, the computer gets no files");
+    server.stop();
+    r.svc.stop();
+}
+
+#[test]
+fn edge_without_a_working_app_nothing_is_queued_for_that_person() {
+    let r = rig_edge(0);
+    let mut n = 1;
+    link(&r, SAM, A, &mut n);
+    let id = r.store.devices_of(SAM)[0].id.clone();
+    r.store.device_touch(&id, now_ms() - 15 * 24 * 3600 * 1000);
+    r.mock.add_group_document(n, A, 59, MEMBER, "x.pdf", b"%PDF".to_vec(), None);
+    assert!(until(20, || r.mock.texts_in(SAM).iter().any(|t| t.contains("not being checked"))), "{:?}", r.mock.texts_in(SAM));
+    assert_eq!(r.store.edge_waiting(SAM), 0, "no job is kept for an owner whose app is gone");
     r.svc.stop();
 }
 

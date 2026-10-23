@@ -5,6 +5,9 @@
 //!   POST   /v1/report  {text}        -> 202                 queues a report to the linked person's private chat
 //!   GET    /v1/status                -> {linked, reachable}
 //!   DELETE /v1/link                  -> 204                 unlinks this computer
+//!   GET    /v1/jobs                  -> {jobs:[...]}        files posted in the owner's protected groups, to be checked HERE
+//!   GET    /v1/jobs/<id>/file        -> the file's bytes    passed through memory from Telegram, never stored on the server
+//!   POST   /v1/jobs/<id>/result      {ok, result|error}     the verdict the computer reached (see edge.rs)
 //! The device token is a random 256-bit secret shown once; only its hash is stored. A token only ever reaches the person
 //! it was issued for: there is no way to name another chat. Report text is reduced to a few safe formatting tags.
 //!
@@ -12,9 +15,10 @@
 //! Run it behind HTTPS: the client refuses plain http except to the local machine.
 
 use crate::hosted::normalize_device_code;
+use crate::edge::{EdgeJobInfo, EdgeSubmit, FileSource, EDGE_BATCH};
 use crate::hosted_store::{token_hash, CodeKind};
 use crate::queue::{now_ms, JobStore};
-use crate::telegram::{Courier, TgError};
+use crate::telegram::{Courier, TgError, MAX_BOT_DOWNLOAD};
 use rand::RngCore;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -25,12 +29,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub const MAX_BODY: u64 = 8 * 1024;
+pub const MAX_BODY: u64 = 16 * 1024;
 pub const MAX_TEXT: usize = 3500;
 pub const REPORTS_PER_MIN: usize = 6;
 pub const REPORTS_PER_HOUR: usize = 60;
 pub const LINK_TRIES_PER_10_MIN_PER_IP: usize = 10;
 pub const LINK_TRIES_PER_10_MIN_ALL: usize = 100;
+/// An app asks for work every few seconds while it runs.
+pub const JOB_POLLS_PER_MIN: usize = 120;
+pub const FILE_FETCHES_PER_MIN: usize = 60;
 
 // ---- text safety -------------------------------------------------------------------------------------------------
 
@@ -135,17 +142,22 @@ impl RelayServer {
     /// Listen on `addr` (for example `127.0.0.1:8787`). `trust_proxy`: take the client address from `X-Forwarded-For`
     /// (only when a reverse proxy you control sits in front, otherwise anyone could spoof it).
     pub fn start(addr: &str, store: Arc<JobStore>, trust_proxy: bool) -> Result<RelayServer, String> {
+        Self::start_with_files(addr, store, trust_proxy, None)
+    }
+
+    /// Like `start`, and also able to hand an app the bytes of the files it was asked to check (needs the bot's access to Telegram).
+    pub fn start_with_files(addr: &str, store: Arc<JobStore>, trust_proxy: bool, files: Option<Arc<dyn FileSource>>) -> Result<RelayServer, String> {
         let server = Arc::new(tiny_http::Server::http(addr).map_err(|e| e.to_string())?);
         let bound = server.server_addr().to_string();
         let stop = Arc::new(AtomicBool::new(false));
         let limits = Arc::new(Limits::default());
         let mut threads = vec![];
-        for i in 0..4 {
-            let (srv, st, stop2, lim) = (server.clone(), store.clone(), stop.clone(), limits.clone());
+        for i in 0..8 {
+            let (srv, st, stop2, lim, fs) = (server.clone(), store.clone(), stop.clone(), limits.clone(), files.clone());
             threads.push(std::thread::Builder::new().name(format!("sentrix-relay-{i}")).spawn(move || {
                 while !stop2.load(Ordering::Relaxed) {
                     match srv.recv_timeout(Duration::from_millis(300)) {
-                        Ok(Some(req)) => handle(req, &st, &lim, trust_proxy),
+                        Ok(Some(req)) => handle(req, &st, &lim, trust_proxy, fs.as_deref()),
                         Ok(None) => {}
                         Err(_) => std::thread::sleep(Duration::from_millis(50)),
                     }
@@ -194,7 +206,7 @@ fn read_json(req: &mut tiny_http::Request) -> Option<Value> {
     serde_json::from_slice(&buf).ok()
 }
 
-fn handle(mut req: tiny_http::Request, store: &JobStore, lim: &Limits, trust_proxy: bool) {
+fn handle(mut req: tiny_http::Request, store: &JobStore, lim: &Limits, trust_proxy: bool, files: Option<&dyn FileSource>) {
     let now = now_ms();
     let url = req.url().split('?').next().unwrap_or("").to_string();
     let method = req.method().clone();
@@ -274,8 +286,75 @@ fn handle(mut req: tiny_http::Request, store: &JobStore, lim: &Limits, trust_pro
             store.device_revoke(dev.user_id, &dev.id, now);
             reply(req, 204, json!(null));
         }
+        ("GET", "/v1/jobs") => {
+            let Some(token) = bearer(&req) else { return reply(req, 401, json!({"error": "Not linked."})) };
+            let Some(dev) = store.device_by_token(&token) else { return reply(req, 401, json!({"error": "Not linked."})) };
+            if !hit(&lim.per_device, &format!("{}:j", dev.id), JOB_POLLS_PER_MIN, Duration::from_secs(60)) {
+                return reply(req, 429, json!({"error": "Asking too often."}));
+            }
+            // Asking for work is also how the app shows it is installed and running.
+            store.device_touch(&dev.id, now);
+            let jobs: Vec<EdgeJobInfo> = store
+                .edge_claim(dev.user_id, EDGE_BATCH, now)
+                .into_iter()
+                .map(|j| {
+                    let group = store.group_get(j.group_chat).ok().flatten().map(|g| g.title).unwrap_or_default();
+                    EdgeJobInfo { id: j.id, name: j.name, size: j.size, group: group.chars().filter(|c| !c.is_control()).take(60).collect() }
+                })
+                .collect();
+            reply(req, 200, json!({ "jobs": jobs }));
+        }
+        ("GET", p) if job_path(p, "/file").is_some() => {
+            let id = job_path(p, "/file").unwrap().to_string();
+            let Some(token) = bearer(&req) else { return reply(req, 401, json!({"error": "Not linked."})) };
+            let Some(dev) = store.device_by_token(&token) else { return reply(req, 401, json!({"error": "Not linked."})) };
+            if !hit(&lim.per_device, &format!("{}:f", dev.id), FILE_FETCHES_PER_MIN, Duration::from_secs(60)) {
+                return reply(req, 429, json!({"error": "Too many files at once."}));
+            }
+            // Only the person the file belongs to, and only a job that was handed out to their apps.
+            let job = match store.edge_get(&id) {
+                Some(j) if j.owner == dev.user_id && j.state == "leased" => j,
+                _ => return reply(req, 404, json!({"error": "No such file for you."})),
+            };
+            let Some(src) = files else { return reply(req, 503, json!({"error": "This server cannot hand out files."})) };
+            store.device_touch(&dev.id, now);
+            // The bytes live in memory only for as long as this answer takes. Nothing is written to the server's disk.
+            match src.fetch(&job.file_id, MAX_BOT_DOWNLOAD) {
+                Ok(bytes) => {
+                    let mut r = tiny_http::Response::from_data(bytes);
+                    if let Ok(h) = tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/octet-stream"[..]) {
+                        r = r.with_header(h);
+                    }
+                    let _ = req.respond(r);
+                }
+                Err(e) => reply(req, 502, json!({"error": e.chars().filter(|c| !c.is_control()).take(200).collect::<String>()})),
+            }
+        }
+        ("POST", p) if job_path(p, "/result").is_some() => {
+            let id = job_path(p, "/result").unwrap().to_string();
+            let Some(token) = bearer(&req) else { return reply(req, 401, json!({"error": "Not linked."})) };
+            let Some(dev) = store.device_by_token(&token) else { return reply(req, 401, json!({"error": "Not linked."})) };
+            let Some(b) = read_json(&mut req) else { return reply(req, 400, json!({"error": "Bad request."})) };
+            let Ok(sub) = serde_json::from_value::<EdgeSubmit>(b) else { return reply(req, 400, json!({"error": "Bad request."})) };
+            store.device_touch(&dev.id, now);
+            let (ok, payload) = match (sub.ok, &sub.result) {
+                (true, Some(r)) => (true, serde_json::to_string(r).unwrap_or_default()),
+                _ => (false, sub.error.unwrap_or_default().chars().filter(|c| !c.is_control()).take(200).collect::<String>()),
+            };
+            if store.edge_finish(&id, dev.user_id, ok, &payload, now) {
+                reply(req, 200, json!({"ok": true}));
+            } else {
+                reply(req, 404, json!({"error": "No such job for you, or it was already answered."}));
+            }
+        }
         _ => reply(req, 404, json!({"error": "Not found."})),
     }
+}
+
+/// `/v1/jobs/<id><suffix>` with a well-formed id (a UUID), or `None`.
+fn job_path<'a>(path: &'a str, suffix: &str) -> Option<&'a str> {
+    let id = path.strip_prefix("/v1/jobs/")?.strip_suffix(suffix)?;
+    (id.len() == 36 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')).then_some(id)
 }
 
 // ---- client ------------------------------------------------------------------------------------------------------
@@ -338,6 +417,46 @@ impl RelayClient {
             }
             401 => Ok((false, false)),
             c => Err(format!("The relay answered {c}.")),
+        }
+    }
+
+    /// Files waiting to be checked on this computer. Also tells the relay the app is running.
+    pub fn jobs(&self) -> Result<Vec<EdgeJobInfo>, String> {
+        let mut r = self.agent.get(&format!("{}/v1/jobs", self.base)).header("Authorization", &format!("Bearer {}", self.token)).call().map_err(|_| "Could not reach the SENTRIX relay.".to_string())?;
+        match r.status().as_u16() {
+            200 => {
+                let v: Value = r.body_mut().read_json().unwrap_or(json!({}));
+                Ok(serde_json::from_value(v["jobs"].clone()).unwrap_or_default())
+            }
+            401 => Err("This computer is not linked any more.".into()),
+            c => Err(format!("The relay answered {c}.")),
+        }
+    }
+
+    /// The bytes of one file, as the bot received them from Telegram.
+    pub fn fetch_job_file(&self, id: &str) -> Result<Vec<u8>, String> {
+        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(180))).http_status_as_error(false).build().into();
+        let mut r = agent.get(&format!("{}/v1/jobs/{id}/file", self.base)).header("Authorization", &format!("Bearer {}", self.token)).call().map_err(|_| "Could not reach the SENTRIX relay.".to_string())?;
+        match r.status().as_u16() {
+            200 => r.body_mut().with_config().limit(MAX_BOT_DOWNLOAD + 1).read_to_vec().map_err(|e| e.to_string()),
+            c => {
+                let v: Value = r.body_mut().read_json().unwrap_or(json!({}));
+                Err(err_text(&v, &format!("The relay answered {c}.")))
+            }
+        }
+    }
+
+    /// Send the verdict for one file.
+    pub fn submit_job_result(&self, id: &str, s: &EdgeSubmit) -> Result<(), String> {
+        let mut r = self.agent.post(&format!("{}/v1/jobs/{id}/result", self.base)).header("Authorization", &format!("Bearer {}", self.token)).send_json(s).map_err(|_| "Could not reach the SENTRIX relay.".to_string())?;
+        match r.status().as_u16() {
+            200 => Ok(()),
+            // Already answered (a retry after a lost reply) is fine.
+            404 => Ok(()),
+            c => {
+                let v: Value = r.body_mut().read_json().unwrap_or(json!({}));
+                Err(err_text(&v, &format!("The relay answered {c}.")))
+            }
         }
     }
 

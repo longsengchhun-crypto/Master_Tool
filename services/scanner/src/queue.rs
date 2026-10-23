@@ -197,6 +197,16 @@ CREATE TABLE IF NOT EXISTS user_history(
   num INTEGER NOT NULL DEFAULT 0, -- "Scan History #num": every room has the same name, so each gets a number the person can tell apart
   PRIMARY KEY (user_id, chat_id)
 );
+-- Files posted in protected groups that are checked on the owner's own computer (see edge.rs). The server keeps only this
+-- bookkeeping row (name, size, Telegram file id) and, once the app answers, a short verdict. Never the file itself.
+CREATE TABLE IF NOT EXISTS edge_jobs(
+  id TEXT PRIMARY KEY, owner INTEGER NOT NULL, group_chat INTEGER NOT NULL, message_id INTEGER NOT NULL,
+  file_id TEXT NOT NULL, file_unique_id TEXT, name TEXT NOT NULL, size INTEGER NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('queued','leased','done','failed','closed','expired')),
+  leased_at INTEGER, result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  UNIQUE(group_chat, message_id)
+);
+CREATE INDEX IF NOT EXISTS edge_jobs_owner ON edge_jobs(owner, state);
 -- Which Scan History group a protected group reports to. No row: all of the owner's Scan History groups.
 CREATE TABLE IF NOT EXISTS group_report_to(
   group_chat_id INTEGER PRIMARY KEY, history_chat_id INTEGER NOT NULL

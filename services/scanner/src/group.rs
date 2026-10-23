@@ -82,7 +82,7 @@ pub(crate) fn allow(map: &Mutex<HashMap<i64, VecDeque<Instant>>>, chat: i64, lim
     true
 }
 
-fn verdict_code(v: Verdict) -> &'static str {
+pub(crate) fn verdict_code(v: Verdict) -> &'static str {
     match v {
         Verdict::Malicious => "MALICIOUS",
         Verdict::Suspicious => "SUSPICIOUS",
@@ -313,7 +313,7 @@ impl Inner {
         }
     }
 
-    fn post_report(&self, g: &Group, key: &str, body: String, urgent: bool) -> bool {
+    pub(crate) fn post_report(&self, g: &Group, key: &str, body: String, urgent: bool) -> bool {
         let dests = self.report_dests(g);
         if dests.is_empty() {
             self.event("group_report_undeliverable", "warning", "A scan report could not be sent because the person who protects the group cannot be reached. They need to open the bot and press Start.");
@@ -750,6 +750,10 @@ impl Inner {
             return incomplete_note("is larger than 20 MB, the most Telegram lets a bot download.".into());
         }
         self.start_placeholder(bot, g, mid, &shown, size);
+        // Shared bot with checking on the customer's computer: hand the file over as a job. Nothing is downloaded or scanned here.
+        if self.edge_on() {
+            return self.edge_submit(g, mid, doc, &shown, now);
+        }
         let (path, _) = match bot.get_file(&doc.file_id) {
             Ok(x) => x,
             Err(e) => {
@@ -781,7 +785,7 @@ impl Inner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn finish_document(&self, bot: &BotClient, me: &BotInfo, chat: i64, mid: i64, uid: Option<&str>, shown: &str, r: &ScanReport) {
+    pub(crate) fn finish_document(&self, bot: &BotClient, me: &BotInfo, chat: i64, mid: i64, uid: Option<&str>, shown: &str, r: &ScanReport) {
         let now = now_ms();
         // Read the settings again: an administrator may have changed them while this file was being scanned.
         let Ok(Some(g)) = self.store.group_get(chat) else { return };

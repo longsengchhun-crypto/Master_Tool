@@ -7,7 +7,10 @@
 //!
 //!   SENTRIX_BOT_TOKEN       required. From @BotFather.
 //!   SENTRIX_DATA_DIR        where botd.db, the quarantine vault and (if you keep them here) ClamAV signatures live
-//!   SENTRIX_CLAMAV_DIR      folder with clamd/freshclam (without it every file is reported "not checked", never clean)
+//!   SENTRIX_EDGE_SCAN       1 (default): files posted in protected groups are checked on each customer's own computer by the
+//!                           SENTRIX app. This server then starts no scan engine, scans nothing and keeps no customer file.
+//!                           0: check them on this server instead (needs SENTRIX_CLAMAV_DIR)
+//!   SENTRIX_CLAMAV_DIR      only with SENTRIX_EDGE_SCAN=0: folder with clamd/freshclam (without it every file is "not checked")
 //!   SENTRIX_RELAY_BIND      address for the app relay, default 127.0.0.1:8787 (put HTTPS in front of it)
 //!   SENTRIX_TRUST_PROXY     1 when a reverse proxy you control sets X-Forwarded-For
 //!   SENTRIX_DOWNLOAD_URL    where the bot tells people to get the desktop app (default: the newest release on GitHub)
@@ -126,7 +129,7 @@ fn main() {
     }
     let Ok(token) = std::env::var("SENTRIX_BOT_TOKEN") else { die("SENTRIX_BOT_TOKEN is not set.") };
     let bot = match BotClient::new(token.trim()) {
-        Ok(b) => b,
+        Ok(b) => Arc::new(b),
         Err(e) => die(&e.user_message()),
     };
     let me = match bot.get_me() {
@@ -151,12 +154,20 @@ fn main() {
     let store = Arc::new(JobStore::open(&data_dir.join("botd.db")).unwrap_or_else(|e| die(&format!("database: {e}"))));
     let quarantine = Arc::new(Quarantine::open(data_dir.join("vault")).unwrap_or_else(|e| die(&format!("quarantine: {e}"))));
 
-    // The scan engine. Without it nothing can be checked, and every file is reported "not checked", never clean.
+    // Where files are checked. By default on each customer's own computer, so this machine neither scans nor stores anything.
+    let edge = std::env::var("SENTRIX_EDGE_SCAN").map(|v| v.trim() != "0").unwrap_or(true);
+    // The scan engine (only when this server checks files itself). Without it nothing can be checked, and every file is
+    // reported "not checked", never clean.
     if std::env::var_os("SENTRIX_CLAMD_THREADS").is_none() {
         std::env::set_var("SENTRIX_CLAMD_THREADS", sentrix_core::service::doc_workers().to_string());
     }
-    println!("[botd] checking up to {} files at once", sentrix_core::service::doc_workers());
-    let clam = std::env::var_os("SENTRIX_CLAMAV_DIR").map(|d| Arc::new(ClamEngine::new(PathBuf::from(d), data_dir.clone())));
+    let clam = if edge {
+        println!("[botd] files are checked on each customer's computer (SENTRIX app). No scan engine runs here and no customer file is stored.");
+        None
+    } else {
+        println!("[botd] checking up to {} files at once on this server", sentrix_core::service::doc_workers());
+        std::env::var_os("SENTRIX_CLAMAV_DIR").map(|d| Arc::new(ClamEngine::new(PathBuf::from(d), data_dir.clone())))
+    };
     if let Some(c) = &clam {
         // A fresh server has no signatures yet: fetch them before starting (the first download takes a few minutes).
         if c.is_installed() && !c.has_database() {
@@ -185,7 +196,7 @@ fn main() {
                 Err(e) => println!("[botd] signature update failed: {e}"),
             }
         });
-    } else {
+    } else if !edge {
         println!("[botd] WARNING: SENTRIX_CLAMAV_DIR is not set. Files will be reported as not checked.");
     }
     let scanner = Arc::new(Scanner::new(Limits::default(), clam.clone()));
@@ -193,16 +204,17 @@ fn main() {
     let mut cfg = ServiceConfig::new(data_dir.join("tmp"));
     cfg.realtime = false;
     cfg.group_shield = true;
-    cfg.hosted = Some(HostedConfig { download_url: std::env::var("SENTRIX_DOWNLOAD_URL").ok().filter(|u| !u.trim().is_empty()).unwrap_or_else(|| DEFAULT_DOWNLOAD_URL.into()) });
+    cfg.hosted = Some(HostedConfig { download_url: std::env::var("SENTRIX_DOWNLOAD_URL").ok().filter(|u| !u.trim().is_empty()).unwrap_or_else(|| DEFAULT_DOWNLOAD_URL.into()), edge, edge_wait_ms: 0 });
     let clam_for_update = clam.clone();
     let svc = Arc::new(ProtectionService::new(scanner, quarantine, store.clone(), Arc::new(LogHooks), cfg));
-    svc.set_bot(Some(Arc::new(bot)));
+    svc.set_bot(Some(bot.clone()));
     svc.start();
     start_self_update(svc.clone(), clam_for_update);
 
     let bind = std::env::var("SENTRIX_RELAY_BIND").unwrap_or_else(|_| "127.0.0.1:8787".into());
     let trust = std::env::var("SENTRIX_TRUST_PROXY").map(|v| v == "1").unwrap_or(false);
-    let relay = RelayServer::start(&bind, store.clone(), trust).unwrap_or_else(|e| die(&format!("relay could not listen on {bind}: {e}")));
+    // The relay hands customers' apps the files they must check, straight through memory from Telegram (never to disk).
+    let relay = RelayServer::start_with_files(&bind, store.clone(), trust, Some(bot.clone())).unwrap_or_else(|e| die(&format!("relay could not listen on {bind}: {e}")));
     println!("[botd] relay listening on {} (put HTTPS in front of it)", relay.addr);
     println!("[botd] running");
 
@@ -224,6 +236,10 @@ fn main() {
             store.codes_prune(now);
             let t = store.hosted_totals();
             println!("[botd] people={} linked_apps={}", t.users, t.devices);
+            if edge {
+                let (waiting, answered) = store.edge_totals();
+                println!("[botd] files waiting for customers' computers={waiting} answered_today={answered}");
+            }
         }
     }
 }

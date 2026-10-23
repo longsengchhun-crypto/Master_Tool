@@ -31,6 +31,35 @@ link, no Scan History, nothing is checked for them until the app is installed an
   been in touch. Someone who calls the relay by hand with a code from the bot would pass the check. The token and the code
   are issued only to that person, so this is not a way into anyone else's protection, but it is not proof of installation.
 
+## Files are checked on the customer's own computer (rule)
+
+**The bot's server does not scan or store customers' files.** It does only what needs the bot's token; the checking runs in
+the SENTRIX app on the customer's computer, with that computer's own scan engine. The bot still decides who may use it, what is
+reported and where, and the app updates itself from our releases.
+
+1. A document is posted in a protected group. The bot records a small **job** (file name, size, Telegram file id, which group,
+   whose). It downloads nothing and scans nothing.
+2. The owner's app asks the relay for its jobs every few seconds (`GET /v1/jobs`; that is also how the bot knows the app is
+   running). For each job it fetches the file through the relay (`GET /v1/jobs/<id>/file`), scans it locally, and sends back a
+   short verdict (`POST /v1/jobs/<id>/result`: verdict, whether the check was complete, SHA-256, signature names, summary).
+3. The server turns the verdict into the report in Scan History, and, only if the group's administrators agreed, deletes a
+   confirmed-malicious message (only the bot can).
+
+* **What the server does with the file:** the relay gets the bytes from Telegram and passes them straight through memory to the
+  owner's app. They are **not written to the server's disk** and nothing is kept afterwards. The bot cannot give the app a
+  direct Telegram link, because that link contains the bot's token. So the file does pass through the server's memory and
+  network; it is not stored, scanned or inspected there.
+* **What the server keeps per file:** one bookkeeping row (name, size, Telegram file id) until the verdict is used, then only the
+  usual counts. The verdict text is erased once the report is posted.
+* **Control:** only a person with a linked, recently seen app gets jobs; only that person's app can list, fetch or answer them;
+  unlinking a computer in the bot ends its access at once; the server writes the report itself and ignores everything else in
+  the answer. An answer saying "clean" without a complete check is downgraded to "could not be fully checked".
+* **If the owner's computer is off:** the job waits (up to 6 hours) and is checked when the app is back. After that the group's
+  report says the file was **not checked** (never "safe").
+* **Honest limit:** the verdict comes from the owner's computer, so it is as trustworthy as that computer. A tampered app can
+  mislead only its own owner's reports and groups.
+* `SENTRIX_EDGE_SCAN=0` switches the server back to checking files itself (needs ClamAV), the old behaviour.
+
 ## What the customer sees
 
 0. **Install the app.** Before anything below, see *The app comes first*. Steps 1 to 4 describe a person whose app is linked.
@@ -83,7 +112,7 @@ A bot cannot add itself to a group; Telegram does not allow it. What SENTRIX use
 | Clean results | Also reported, in the same place | A group protected through the shared bot reports every result, including "no known threat", because the reports go to a separate room. An administrator can switch clean reports off with `/setup clean off`; that choice is kept |
 | Scan History group | Linked by adding the bot to a group named exactly "Scan History" (any capitalisation), or `/link` in it | The adder must be a member (Telegram is asked). Renaming it, or removing the bot, unlinks it. A person can have many (numbered #1, #2, ...); two people never share routing |
 | App (account protection) result | The customer's private chat, via the relay | Text only: file name, verdict, time. Files stay on the customer's computer |
-| Group files | The bot's server, **in memory and a temporary folder, deleted right after the check** | Up to 20 MB, documents only. This is the one place customer files reach SENTRIX's server; the bot says so |
+| Group files | **The owner's own computer** (the SENTRIX app), passed through the server's memory on the way, never stored there | Up to 20 MB, documents only. See *Files are checked on the customer's own computer* |
 
 Reaching a person requires that they pressed Start and have not blocked the bot. If they blocked it, they are marked
 unreachable, nothing is sent, the gap is recorded as an event, and pressing Start again restores delivery.
@@ -93,7 +122,7 @@ unreachable, nothing is sent, the gap is recorded as an event, and pressing Star
 ```
  customers ──Telegram──▶  @SentrixBot  ◀──── sentrix-botd (this repo: services/scanner/src/bin/botd.rs)
                                             │   ├ Telegram polling (one worker) and the group logic
-                                            │   ├ the scan engine (ClamAV) and quarantine
+                                            │   ├ file jobs: hands each group file to the owner's app, turns the verdict into a report
                                             │   ├ SQLite: people, one-time codes, linked apps, groups, outbox
                                             │   └ HTTP relay (127.0.0.1:8787) ◀── SENTRIX desktop app (HTTPS via a reverse proxy)
 ```
@@ -144,8 +173,8 @@ characters. Only the SHA-256 of a device token is stored.
      account - Link the SENTRIX app
      ```
 3. **Run the service** (`sentrix-botd --check` validates the token and prints the bot's username; then run without `--check`).
-   Environment: `SENTRIX_BOT_TOKEN`, `SENTRIX_DATA_DIR`, `SENTRIX_CLAMAV_DIR`, `SENTRIX_RELAY_BIND`, `SENTRIX_TRUST_PROXY`,
-   `SENTRIX_DOWNLOAD_URL`. It must stay running (a Windows service, `systemd` unit or container) for protection to work.
+   Environment: `SENTRIX_BOT_TOKEN`, `SENTRIX_DATA_DIR`, `SENTRIX_RELAY_BIND`, `SENTRIX_TRUST_PROXY`, `SENTRIX_DOWNLOAD_URL`
+   (no scan engine is needed: `SENTRIX_EDGE_SCAN` is on by default; `SENTRIX_CLAMAV_DIR` matters only with `SENTRIX_EDGE_SCAN=0`). It must stay running (a Windows service, `systemd` unit or container) for protection to work.
 4. **HTTPS for the relay.** Put a reverse proxy (for example Caddy) in front of `SENTRIX_RELAY_BIND` and give the desktop build the
    public address: `SENTRIX_RELAY_URL=https://relay.example.com` and `SENTRIX_BOT_USERNAME=YourBotName` (environment, or
    compiled in via `scripts\build-release.ps1`).
@@ -158,7 +187,8 @@ characters. Only the SHA-256 of a device token is stored.
 * A server that holds one bot for everyone is a single point of failure: when `sentrix-botd` is down, group protection stops and
   desktop reports queue on the customer's computer until it returns.
 * **Scan History is a normal group.** Everyone the customer adds sees every result, including file names. The bot says so when it links.
-* Group scanning means customers' group files reach this server (briefly). That needs to be in the privacy policy and terms.
+* Customers' group files pass through this server's memory on their way to the owner's computer (not stored, not scanned). That
+  still belongs in the privacy policy and terms. Files are checked only while the owner's computer is on (up to 6 hours of waiting).
 * Files over 20 MB, photos, videos and voice messages are not checked in groups (Telegram's bot limit and the product's scope).
 * Secret chats and content Telegram withholds from bots are not visible. No antivirus catches everything.
 * The administrator dashboard does not show the hosted bot's numbers yet (people, groups, linked apps, scans). They are in the

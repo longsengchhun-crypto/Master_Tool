@@ -101,6 +101,18 @@ pub fn run() {
                     std::thread::sleep(std::time::Duration::from_secs(40));
                 });
             }
+            // Files from the groups this person protects through the bot are checked here, on this computer. Asking for work
+            // every few seconds is also how the bot knows the app is installed and running.
+            {
+                let s = st.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(20));
+                    loop {
+                        let answered = hosted::edge_poll(&s);
+                        std::thread::sleep(std::time::Duration::from_millis(if answered > 0 { 200 } else { 3000 }));
+                    }
+                });
+            }
             // Removable drives can appear after start-up; re-evaluate the watch list periodically if enabled.
             {
                 let (h, s) = (handle.clone(), st.clone());

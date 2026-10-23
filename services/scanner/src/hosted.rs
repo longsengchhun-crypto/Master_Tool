@@ -27,6 +27,11 @@ pub const PRIVATE_PER_MIN: usize = 30;
 pub struct HostedConfig {
     /// Where people get the desktop app. Empty: the bot says to ask the SENTRIX contact.
     pub download_url: String,
+    /// Files posted in protected groups are checked on the owner's own computer (the SENTRIX app), not on this server.
+    /// The server then keeps no scan engine busy and stores no customer file. See `edge.rs`.
+    pub edge: bool,
+    /// How long a file may wait for the owner's computer before it is reported as "not checked". 0: six hours.
+    pub edge_wait_ms: i64,
 }
 
 /// `g_` + 20 hex digits. Lowercase on purpose: commands arrive lowercased.
@@ -64,7 +69,7 @@ fn back() -> Vec<Button> {
     vec![Button::callback("Back to menu", "m:main")]
 }
 
-const HOW_IT_WORKS: &str = "<b>How SENTRIX works</b>\nI check files for malware and tell you what I find, here, privately.\n\n<b>The app comes first.</b> I only work for people who have the SENTRIX app installed and linked to me. Without it I do not check anything, for groups or for your account. Keep the app installed: if it is not seen for 14 days, protection pauses until you open it again.\n\n<b>Groups.</b> You add me to as many groups as you like, as long as you are in them. I check documents people post there (up to 20 MB). The results go to your <b>Scan History</b> group(s), never into the protected group. Files are checked and deleted straight away.\n\n<b>Your account.</b> The SENTRIX app on your own computer checks files that reach your Telegram account. Your Telegram login stays on your computer. The app sends me only the result to pass on to you.\n\n<b>Limits.</b> I cannot see secret chats, photos and videos are not checked, and files over 20 MB in groups are not checked. \"Not checked\" never means safe. No antivirus catches everything.";
+const HOW_IT_WORKS: &str = "<b>How SENTRIX works</b>\nI check files for malware and tell you what I find, here, privately.\n\n<b>The app comes first.</b> I only work for people who have the SENTRIX app installed and linked to me. Without it I do not check anything, for groups or for your account. Keep the app installed: if it is not seen for 14 days, protection pauses until you open it again.\n\n<b>Groups.</b> You add me to as many groups as you like, as long as you are in them. I check documents people post there (up to 20 MB). <b>The checking happens on your own computer, in the SENTRIX app</b>, not on my server: I hand the file to your app, which scans it and tells me the result. The results go to your <b>Scan History</b> group(s), never into the protected group. Your computer has to be on for files to be checked.\n\n<b>Your account.</b> The SENTRIX app on your own computer checks files that reach your Telegram account. Your Telegram login stays on your computer. The app sends me only the result to pass on to you.\n\n<b>Limits.</b> I cannot see secret chats, photos and videos are not checked, and files over 20 MB in groups are not checked. \"Not checked\" never means safe. No antivirus catches everything.";
 
 impl Inner {
     fn hosted_download_url(&self) -> String {
@@ -179,7 +184,7 @@ impl Inner {
         self.private_say(
             bot,
             uid,
-            "<b>Protect a group</b>\n1. Make a new group called <b>Scan History</b> and add me to it. I notice it by myself and start sending results there, so the group you protect stays quiet. You can add other people to it too: everyone in it can read the results. Make as many Scan History groups as you like, and every one gets every result.\n2. Press <b>Choose a group</b> below and pick the group to protect. Telegram adds me to it. You only need to be a member of it, not an administrator. Protect as many groups as you like: come back here and press the button again for each one.\n3. I confirm in your Scan History group as soon as it is ready.\n\nI check documents people post in the group (up to 20 MB) and delete them straight away. Until a Scan History group exists, results come to this chat.\n\nThe button works for 30 minutes.",
+            "<b>Protect a group</b>\n1. Make a new group called <b>Scan History</b> and add me to it. I notice it by myself and start sending results there, so the group you protect stays quiet. You can add other people to it too: everyone in it can read the results. Make as many Scan History groups as you like, and every one gets every result.\n2. Press <b>Choose a group</b> below and pick the group to protect. Telegram adds me to it. You only need to be a member of it, not an administrator. Protect as many groups as you like: come back here and press the button again for each one.\n3. I confirm in your Scan History group as soon as it is ready.\n\nDocuments people post in the group (up to 20 MB) are checked by your SENTRIX app, on your own computer, so keep it running. Until a Scan History group exists, results come to this chat.\n\nThe button works for 30 minutes.",
             &[vec![Button::url("Choose a group", &url)], back()],
         );
     }
