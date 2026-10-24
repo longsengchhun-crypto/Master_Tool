@@ -10,8 +10,9 @@ automatically, one install command, and it updates itself.
    about 1.3 GB), 2 or more CPU cores, 20 GB disk. Typical cost: about 4 to 8 USD a month (Hetzner, DigitalOcean, Vultr, Contabo),
    or a free-tier VM from a cloud provider. This needs your account and your payment method; it cannot be created from here.
 2. **The bot token** from @BotFather (the same one you use now).
-3. *Optional:* a domain name pointing at the server. Only the **desktop app's personal-account link** needs it (the app reports
-   through an HTTPS address). Group protection works without it.
+3. *Optional:* your own domain name. If you give none, the installer uses a free automatic HTTPS name (`<server-ip>.sslip.io`).
+   **The HTTPS address is required**: the desktop app links to the bot, fetches files to check and returns verdicts through it.
+   An app built with `http://127.0.0.1:8787` only works on the one computer that runs the bot.
 
 ## Install (about five minutes)
 
@@ -22,7 +23,10 @@ automatically, one install command, and it updates itself.
    curl -fsSL https://raw.githubusercontent.com/longsengchhun-crypto/Master_Tool/main/deploy/install.sh | sudo bash
    ```
    It installs Docker, asks for the token (hidden) and optionally a domain, and starts the bot.
-3. The first start downloads the malware signatures (a few minutes). Watch: `docker compose -f /opt/sentrix/docker-compose.yml logs -f bot`.
+3. **Build the address into the app.** The installer ends by printing `SENTRIX_RELAY_URL=https://...`. Put that line and
+   `SENTRIX_BOT_USERNAME=YourBot` in `.sentrix-devot.env` on your computer, run `scriptsuild-release.ps1`, then publish the
+   release. Customers' apps update themselves. Open ports 80 and 443 in the provider's firewall panel if it has one.
+4. The first start downloads the malware signatures (a few minutes). Watch: `docker compose -f /opt/sentrix/docker-compose.yml logs -f bot`.
    When it prints `running`, send a file to a protected group.
 
 Make the image public once: GitHub > your profile > Packages > `sentrix-bot` > Package settings > Change visibility > Public.
@@ -47,8 +51,10 @@ should be done when the traffic is real; the numbers will tell you when. Watch C
 ## What still stops when a computer is off
 
 **Only features that run on the user's computer:** the desktop app's real-time folder protection and *personal account*
-protection (the Telegram login stays on the person's PC by design and by your decision). Group protection through the bot does
-not depend on any user's computer at all.
+protection (the Telegram login stays on the person's PC by design and by your decision). Group files are also checked on the group owner's
+computer (your decision: no customer file is scanned or kept on the server), so a file waits until that person's app is running.
+Your own computer is not needed for anything once the server runs. The server needs less power than the table above if
+`SENTRIX_EDGE_SCAN` is left at its default, but keep 2 GB for headroom.
 
 ## Other ways to host
 
