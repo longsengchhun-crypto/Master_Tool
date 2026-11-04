@@ -13,7 +13,7 @@
     "dependencies":  {
                          "@sentrix/contracts":  "*",
                          "@node-rs/argon2":  "^2.0.2",
-                         "jose":  "^6.2.13",
+                         "jose":  "^6.2.14",
                          "next":  "^16.4.2",
                          "otplib":  "^13.5.0",
                          "pg":  "^8.23.1",
